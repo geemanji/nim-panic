@@ -14,16 +14,298 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      auth_nonces: {
+        Row: {
+          created_at: string
+          expires_at: string
+          id: string
+          nonce: string
+          used_at: string | null
+          wallet_address: string
+        }
+        Insert: {
+          created_at?: string
+          expires_at: string
+          id?: string
+          nonce: string
+          used_at?: string | null
+          wallet_address: string
+        }
+        Update: {
+          created_at?: string
+          expires_at?: string
+          id?: string
+          nonce?: string
+          used_at?: string | null
+          wallet_address?: string
+        }
+        Relationships: []
+      }
+      leaderboard_stats: {
+        Row: {
+          accuracy: number
+          nim_won: number
+          period: string
+          points: number
+          predictions: number
+          streak: number
+          updated_at: string
+          user_id: string
+          username: string
+          wins: number
+        }
+        Insert: {
+          accuracy?: number
+          nim_won?: number
+          period: string
+          points?: number
+          predictions?: number
+          streak?: number
+          updated_at?: string
+          user_id: string
+          username: string
+          wins?: number
+        }
+        Update: {
+          accuracy?: number
+          nim_won?: number
+          period?: string
+          points?: number
+          predictions?: number
+          streak?: number
+          updated_at?: string
+          user_id?: string
+          username?: string
+          wins?: number
+        }
+        Relationships: []
+      }
+      prediction_entries: {
+        Row: {
+          confirmed_at: string | null
+          created_at: string
+          id: string
+          memo: string
+          outcome: string
+          prediction_id: string
+          result: string | null
+          stake_nim: number
+          status: string
+          transaction_hash: string | null
+          user_id: string
+        }
+        Insert: {
+          confirmed_at?: string | null
+          created_at?: string
+          id?: string
+          memo: string
+          outcome: string
+          prediction_id: string
+          result?: string | null
+          stake_nim: number
+          status?: string
+          transaction_hash?: string | null
+          user_id: string
+        }
+        Update: {
+          confirmed_at?: string | null
+          created_at?: string
+          id?: string
+          memo?: string
+          outcome?: string
+          prediction_id?: string
+          result?: string | null
+          stake_nim?: number
+          status?: string
+          transaction_hash?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prediction_entries_prediction_id_fkey"
+            columns: ["prediction_id"]
+            isOneToOne: false
+            referencedRelation: "predictions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      predictions: {
+        Row: {
+          category: string
+          created_at: string
+          description: string | null
+          id: string
+          is_demo: boolean
+          lock_time: string
+          max_stake_nim: number
+          min_stake_nim: number
+          outcome_totals: Json
+          outcomes: Json
+          participants_count: number
+          question: string
+          resolution_time: string
+          start_time: string
+          status: string
+          total_staked_nim: number
+          winning_outcome: string | null
+        }
+        Insert: {
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_demo?: boolean
+          lock_time: string
+          max_stake_nim?: number
+          min_stake_nim?: number
+          outcome_totals?: Json
+          outcomes: Json
+          participants_count?: number
+          question: string
+          resolution_time: string
+          start_time?: string
+          status?: string
+          total_staked_nim?: number
+          winning_outcome?: string | null
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_demo?: boolean
+          lock_time?: string
+          max_stake_nim?: number
+          min_stake_nim?: number
+          outcome_totals?: Json
+          outcomes?: Json
+          participants_count?: number
+          question?: string
+          resolution_time?: string
+          start_time?: string
+          status?: string
+          total_staked_nim?: number
+          winning_outcome?: string | null
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          best_streak: number
+          created_at: string
+          id: string
+          nim_staked: number
+          nim_won: number
+          predictions_count: number
+          streak: number
+          username: string
+          wallet_address: string
+          wins_count: number
+        }
+        Insert: {
+          best_streak?: number
+          created_at?: string
+          id: string
+          nim_staked?: number
+          nim_won?: number
+          predictions_count?: number
+          streak?: number
+          username: string
+          wallet_address: string
+          wins_count?: number
+        }
+        Update: {
+          best_streak?: number
+          created_at?: string
+          id?: string
+          nim_staked?: number
+          nim_won?: number
+          predictions_count?: number
+          streak?: number
+          username?: string
+          wallet_address?: string
+          wins_count?: number
+        }
+        Relationships: []
+      }
+      settlements: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          id: string
+          paid_at: string | null
+          payout_nim: number
+          prediction_entry_id: string
+          status: string
+          transaction_hash: string | null
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          paid_at?: string | null
+          payout_nim?: number
+          prediction_entry_id: string
+          status?: string
+          transaction_hash?: string | null
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          paid_at?: string | null
+          payout_nim?: number
+          prediction_entry_id?: string
+          status?: string
+          transaction_hash?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "settlements_prediction_entry_id_fkey"
+            columns: ["prediction_entry_id"]
+            isOneToOne: true
+            referencedRelation: "prediction_entries"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +432,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "user"],
+    },
   },
 } as const

@@ -5,7 +5,7 @@ import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@/hooks/useWallet";
 import { getMyProfile, getWalletBalance } from "@/lib/game.functions";
-import { formatNim, lunaToNim, shortenAddress } from "@/lib/nim";
+import { formatNim, shortenAddress } from "@/lib/nim";
 
 export const Route = createFileRoute("/profile")({
   head: () => ({
@@ -60,7 +60,7 @@ function ProfilePage() {
   }
 
   const data = profile.data;
-  const balanceLuna = (balance.data as { balanceLuna?: number } | undefined)?.balanceLuna;
+  const balanceNim = balance.data?.nim ?? null;
 
   return (
     <AppShell>
@@ -78,8 +78,8 @@ function ProfilePage() {
           On-chain balance:{" "}
           {balance.isLoading
             ? "loading…"
-            : typeof balanceLuna === "number"
-              ? `${formatNim(lunaToNim(balanceLuna))} NIM`
+            : typeof balanceNim === "number"
+              ? `${formatNim(balanceNim)} NIM`
               : "unavailable"}
         </p>
       </section>

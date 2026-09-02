@@ -91,11 +91,11 @@ export type ChainTransaction = {
   to: string;
   value: number;
   fee: number;
-  data?: string;
-  blockNumber?: number;
-  confirmations?: number;
-  timestamp?: number;
-  executionResult?: boolean;
+  data?: string | undefined;
+  blockNumber?: number | undefined;
+  confirmations?: number | undefined;
+  timestamp?: number | undefined;
+  executionResult?: boolean | undefined;
 };
 
 /** Reads a transaction from the chain. Returns null when it is not (yet) known. */

@@ -150,7 +150,7 @@ function PickCard({ row }: { row: PickRow }) {
       {row.status === "WON" && (
         <p className="mt-2 rounded-xl bg-success/15 px-3 py-2 text-xs text-success">
           Won +{formatNim(payout)} NIM ·{" "}
-          {settlement?.status === "PAID" ? "paid out" : "payout pending"}
+          {settlement?.status === "SENT" ? "paid out" : "payout pending"}
         </p>
       )}
       {row.status === "LOST" && (

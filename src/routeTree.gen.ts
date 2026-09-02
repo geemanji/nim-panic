@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as LeaderboardRouteImport } from './routes/leaderboard'
 import { Route as PicksRouteImport } from './routes/picks'
 import { Route as ProfileRouteImport } from './routes/profile'
@@ -18,6 +19,11 @@ import { Route as PIdRouteImport } from './routes/p.$id'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LeaderboardRoute = LeaderboardRouteImport.update({
@@ -43,6 +49,7 @@ const PIdRoute = PIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/leaderboard': typeof LeaderboardRoute
   '/picks': typeof PicksRoute
   '/profile': typeof ProfileRoute
@@ -50,6 +57,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/leaderboard': typeof LeaderboardRoute
   '/picks': typeof PicksRoute
   '/profile': typeof ProfileRoute
@@ -58,6 +66,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/leaderboard': typeof LeaderboardRoute
   '/picks': typeof PicksRoute
   '/profile': typeof ProfileRoute
@@ -65,14 +74,22 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/leaderboard' | '/picks' | '/profile' | '/p/$id'
+  fullPaths: '/' | '/admin' | '/leaderboard' | '/picks' | '/profile' | '/p/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/leaderboard' | '/picks' | '/profile' | '/p/$id'
-  id: '__root__' | '/' | '/leaderboard' | '/picks' | '/profile' | '/p/$id'
+  to: '/' | '/admin' | '/leaderboard' | '/picks' | '/profile' | '/p/$id'
+  id:
+    | '__root__'
+    | '/'
+    | '/admin'
+    | '/leaderboard'
+    | '/picks'
+    | '/profile'
+    | '/p/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
   LeaderboardRoute: typeof LeaderboardRoute
   PicksRoute: typeof PicksRoute
   ProfileRoute: typeof ProfileRoute
@@ -86,6 +103,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/leaderboard': {
@@ -121,6 +145,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
   LeaderboardRoute: LeaderboardRoute,
   PicksRoute: PicksRoute,
   ProfileRoute: ProfileRoute,

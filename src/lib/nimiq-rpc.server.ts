@@ -32,7 +32,8 @@ export type NimiqConfig = {
 export function getNimiqConfig(): NimiqConfig {
   const network = (process.env["NIMIQ_NETWORK"] ?? "test").toLowerCase() === "main" ? "main" : "test";
   const rpcUrl =
-    (network === "main" ? process.env["NIMIQ_RPC_URL_MAIN"] : process.env["NIMIQ_RPC_URL_TEST"]) ?? null;
+    (network === "main" ? process.env["NIMIQ_RPC_URL_MAIN"] : process.env["NIMIQ_RPC_URL_TEST"]) ??
+    DEFAULT_RPC_URL[network];
   const rawTreasury = process.env["NIM_PANIC_TREASURY_ADDRESS"] ?? "";
   const treasury = normalizeAddress(rawTreasury);
   const treasuryConfigured =

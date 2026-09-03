@@ -4,8 +4,8 @@
  *
  * No private keys are ever handled here. Pure JS (works on the edge runtime).
  */
-import { blake2b } from "@noble/hashes/blake2";
-import { sha256 } from "@noble/hashes/sha2";
+import { blake2b } from "@noble/hashes/blake2.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import * as ed from "@noble/ed25519";
 
 const BASE32_ALPHABET = "0123456789ABCDEFGHJKLMNPQRSTUVXY";

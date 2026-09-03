@@ -14,6 +14,12 @@ import { normalizeAddress, isValidNimiqAddress } from "./nimiq-crypto.server";
 
 const PLACEHOLDER_TREASURY = "NQ07000000000000000000000000000000000";
 
+/** Public fallback endpoints so on-chain verification works without a private node. */
+const DEFAULT_RPC_URL = {
+  test: "https://rpc-testnet.nimiqwatch.com",
+  main: "https://rpc.nimiqwatch.com",
+} as const;
+
 export type NimiqConfig = {
   network: "test" | "main";
   rpcUrl: string | null;

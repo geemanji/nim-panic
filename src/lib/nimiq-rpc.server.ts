@@ -14,6 +14,12 @@ import { normalizeAddress, isValidNimiqAddress } from "./nimiq-crypto.server";
 
 const PLACEHOLDER_TREASURY = "NQ07000000000000000000000000000000000";
 
+/** Public fallback endpoints so on-chain verification works without a private node. */
+const DEFAULT_RPC_URL = {
+  test: "https://rpc-testnet.nimiqwatch.com",
+  main: "https://rpc.nimiqwatch.com",
+} as const;
+
 export type NimiqConfig = {
   network: "test" | "main";
   rpcUrl: string | null;
@@ -26,7 +32,8 @@ export type NimiqConfig = {
 export function getNimiqConfig(): NimiqConfig {
   const network = (process.env["NIMIQ_NETWORK"] ?? "test").toLowerCase() === "main" ? "main" : "test";
   const rpcUrl =
-    (network === "main" ? process.env["NIMIQ_RPC_URL_MAIN"] : process.env["NIMIQ_RPC_URL_TEST"]) ?? null;
+    (network === "main" ? process.env["NIMIQ_RPC_URL_MAIN"] : process.env["NIMIQ_RPC_URL_TEST"]) ??
+    DEFAULT_RPC_URL[network];
   const rawTreasury = process.env["NIM_PANIC_TREASURY_ADDRESS"] ?? "";
   const treasury = normalizeAddress(rawTreasury);
   const treasuryConfigured =

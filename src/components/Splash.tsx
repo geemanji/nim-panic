@@ -20,11 +20,17 @@ export function Splash({ onDone }: { onDone: () => void }) {
     if (leaving) return;
     const elapsed = Date.now() - mountedAt;
     // Hard cap guarantees fade no matter the provider state.
-    const cap = window.setTimeout(() => setLeaving(true), Math.max(0, MAX_DISPLAY_MS - elapsed));
+    const cap = window.setTimeout(() => {
+      console.log("[splash] cap fired", { elapsed });
+      setLeaving(true);
+    }, Math.max(0, MAX_DISPLAY_MS - elapsed));
     let ready: number | undefined;
     if (providerState !== "loading") {
       const remaining = Math.max(0, MIN_DISPLAY_MS - elapsed);
-      ready = window.setTimeout(() => setLeaving(true), remaining);
+      ready = window.setTimeout(() => {
+        console.log("[splash] ready fired", { providerState, remaining });
+        setLeaving(true);
+      }, remaining);
     }
     return () => {
       window.clearTimeout(cap);
@@ -34,6 +40,7 @@ export function Splash({ onDone }: { onDone: () => void }) {
 
   useEffect(() => {
     if (!leaving) return;
+    console.log("[splash] leaving=true, scheduling onDone");
     const t = window.setTimeout(onDone, 450); // match fade-out duration
     return () => window.clearTimeout(t);
   }, [leaving, onDone]);

@@ -131,7 +131,7 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <WalletProvider>
-        {showSplash && <Splash onDone={() => setShowSplash(false)} />}
+        {showSplash && <Splash onDone={() => { console.log("[root] onDone fired"); setShowSplash(false); }} />}
         {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
         <Toaster position="top-center" />

@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { Flame } from "lucide-react";
 import { useWallet } from "@/hooks/useWallet";
 
-const MIN_DISPLAY_MS = 1400;
+const MIN_DISPLAY_MS = 1200;
+const MAX_DISPLAY_MS = 2200;
 
 /**
- * Branded splash shown on first load. Stays until the Nimiq Pay provider
- * finishes initializing (loading → ready/unavailable) and a minimum display
- * time has elapsed, then fades out. Only ever mounts once per session.
+ * Branded splash shown on first load. Stays at least MIN_DISPLAY_MS and at
+ * most MAX_DISPLAY_MS — fading once the Nimiq provider resolves or the cap
+ * hits, whichever comes first. Never lingers longer than the hard cap, so
+ * the app is always reachable even outside Nimiq Pay.
  */
 export function Splash({ onDone }: { onDone: () => void }) {
   const { providerState } = useWallet();
@@ -15,12 +17,20 @@ export function Splash({ onDone }: { onDone: () => void }) {
   const [mountedAt] = useState(() => Date.now());
 
   useEffect(() => {
-    if (providerState === "loading") return;
+    if (leaving) return;
     const elapsed = Date.now() - mountedAt;
-    const remaining = Math.max(0, MIN_DISPLAY_MS - elapsed);
-    const t = window.setTimeout(() => setLeaving(true), remaining);
-    return () => window.clearTimeout(t);
-  }, [providerState, mountedAt]);
+    // Hard cap guarantees fade no matter the provider state.
+    const cap = window.setTimeout(() => setLeaving(true), Math.max(0, MAX_DISPLAY_MS - elapsed));
+    let ready: number | undefined;
+    if (providerState !== "loading") {
+      const remaining = Math.max(0, MIN_DISPLAY_MS - elapsed);
+      ready = window.setTimeout(() => setLeaving(true), remaining);
+    }
+    return () => {
+      window.clearTimeout(cap);
+      if (ready) window.clearTimeout(ready);
+    };
+  }, [providerState, leaving, mountedAt]);
 
   useEffect(() => {
     if (!leaving) return;

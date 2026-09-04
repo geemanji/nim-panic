@@ -1,49 +1,25 @@
 import { useEffect, useState } from "react";
 import { Flame } from "lucide-react";
-import { useWallet } from "@/hooks/useWallet";
 
 const MIN_DISPLAY_MS = 1200;
-const MAX_DISPLAY_MS = 2200;
+const FADE_MS = 500;
 
 /**
- * Branded splash shown on first load. Stays at least MIN_DISPLAY_MS and at
- * most MAX_DISPLAY_MS — fading once the Nimiq provider resolves or the cap
- * hits, whichever comes first. Never lingers longer than the hard cap, so
- * the app is always reachable even outside Nimiq Pay.
+ * Branded splash shown on first load. Fades out after a fixed minimum
+ * display time, then unmounts. No provider/route coupling, so it always
+ * resolves deterministically regardless of Nimiq Pay availability.
  */
 export function Splash({ onDone }: { onDone: () => void }) {
-  const { providerState } = useWallet();
   const [leaving, setLeaving] = useState(false);
-  const [mountedAt] = useState(() => Date.now());
 
   useEffect(() => {
-    if (leaving) return;
-    const elapsed = Date.now() - mountedAt;
-    // Hard cap guarantees fade no matter the provider state.
-    const cap = window.setTimeout(() => {
-      console.log("[splash] cap fired", { elapsed });
-      setLeaving(true);
-    }, Math.max(0, MAX_DISPLAY_MS - elapsed));
-    let ready: number | undefined;
-    if (providerState !== "loading") {
-      const remaining = Math.max(0, MIN_DISPLAY_MS - elapsed);
-      ready = window.setTimeout(() => {
-        console.log("[splash] ready fired", { providerState, remaining });
-        setLeaving(true);
-      }, remaining);
-    }
+    const leaveT = window.setTimeout(() => setLeaving(true), MIN_DISPLAY_MS);
+    const doneT = window.setTimeout(onDone, MIN_DISPLAY_MS + FADE_MS);
     return () => {
-      window.clearTimeout(cap);
-      if (ready) window.clearTimeout(ready);
+      window.clearTimeout(leaveT);
+      window.clearTimeout(doneT);
     };
-  }, [providerState, leaving, mountedAt]);
-
-  useEffect(() => {
-    if (!leaving) return;
-    console.log("[splash] leaving=true, scheduling onDone");
-    const t = window.setTimeout(onDone, 450); // match fade-out duration
-    return () => window.clearTimeout(t);
-  }, [leaving, onDone]);
+  }, [onDone]);
 
   return (
     <div

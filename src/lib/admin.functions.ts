@@ -253,3 +253,109 @@ export const adminRetryPayouts = createServerFn({ method: "POST" })
     }
     return { sent };
   });
+
+/** Tells the console whether this wallet is an admin, and whether bootstrap is still open. */
+export const adminAccess = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { getAdminAddresses } = await import("./nimiq-rpc.server");
+
+    const { data: profile } = await supabaseAdmin
+      .from("profiles")
+      .select("wallet_address")
+      .eq("id", context.userId)
+      .maybeSingle();
+    const { data: role } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", context.userId)
+      .eq("role", "admin")
+      .maybeSingle();
+    const { count } = await supabaseAdmin
+      .from("user_roles")
+      .select("user_id", { count: "exact", head: true })
+      .eq("role", "admin");
+
+    const allowlist = getAdminAddresses();
+    const allowlisted = profile ? allowlist.includes(profile.wallet_address) : false;
+
+    return {
+      isAdmin: Boolean(role) || allowlisted,
+      canBootstrap: (count ?? 0) === 0 && allowlist.length === 0,
+      wallet: profile?.wallet_address ?? null,
+    };
+  });
+
+/** First operator claims the console while no admin exists and no allowlist is set. */
+export const adminClaim = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { getAdminAddresses } = await import("./nimiq-rpc.server");
+    if (getAdminAddresses().length > 0) throw new Error("Admin allowlist is configured.");
+
+    const { count } = await supabaseAdmin
+      .from("user_roles")
+      .select("user_id", { count: "exact", head: true })
+      .eq("role", "admin");
+    if ((count ?? 0) > 0) throw new Error("An admin already exists.");
+
+    const { error } = await supabaseAdmin
+      .from("user_roles")
+      .insert({ user_id: context.userId, role: "admin" });
+    if (error) throw new Error("Could not claim admin access.");
+    return { ok: true };
+  });
+
+/** Closes entries immediately so the market can be resolved. */
+export const adminLockPrediction = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) => z.object({ predictionId: z.string().uuid() }).parse(data))
+  .handler(async ({ data, context }) => {
+    const supabaseAdmin = await assertAdmin(context.userId);
+    const now = new Date().toISOString();
+    const { error } = await supabaseAdmin
+      .from("predictions")
+      .update({ status: "LOCKED", lock_time: now })
+      .eq("id", data.predictionId)
+      .in("status", ["OPEN", "LOCKED"]);
+    if (error) throw new Error("Could not lock the market.");
+    await supabaseAdmin
+      .from("prediction_entries")
+      .update({ status: "LOCKED" })
+      .eq("prediction_id", data.predictionId)
+      .eq("status", "CONFIRMED");
+    return { ok: true };
+  });
+
+/** Puts a market live now: OPEN with fresh lock/resolution windows. */
+export const adminOpenMarket = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) =>
+    z
+      .object({
+        predictionId: z.string().uuid(),
+        lockMinutes: z.number().int().min(1).max(20160),
+        resolutionMinutes: z.number().int().min(2).max(40320),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data, context }) => {
+    const supabaseAdmin = await assertAdmin(context.userId);
+    if (data.resolutionMinutes <= data.lockMinutes)
+      throw new Error("Resolution must come after the lock time.");
+    const now = Date.now();
+    const { error } = await supabaseAdmin
+      .from("predictions")
+      .update({
+        status: "OPEN",
+        winning_outcome: null,
+        lock_time: new Date(now + data.lockMinutes * 60_000).toISOString(),
+        resolution_time: new Date(now + data.resolutionMinutes * 60_000).toISOString(),
+      })
+      .eq("id", data.predictionId)
+      .neq("status", "SETTLED");
+    if (error) throw new Error("Could not open the market.");
+    return { ok: true };
+  });

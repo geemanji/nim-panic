@@ -1,16 +1,24 @@
 import { Link } from "@tanstack/react-router";
 import { Coins, Users } from "lucide-react";
-import { crowdShare, formatNim, payoutMultiplier, type FeedPrediction } from "@/lib/nim";
+import { crowdShare, formatNim, msLeft, payoutMultiplier, type FeedPrediction } from "@/lib/nim";
+import { panicScore, panicTier } from "@/lib/panic";
+import { useNow } from "@/hooks/useNow";
 import { Countdown } from "./Countdown";
 
 export function PredictionCard({ prediction }: { prediction: FeedPrediction }) {
+  const now = useNow();
   const open = prediction.status === "OPEN";
+  const remaining = msLeft(prediction.lock_time, now);
+  const tier = panicTier(remaining);
+  const heat = panicScore(remaining);
 
   return (
     <Link
       to="/p/$id"
       params={{ id: prediction.id }}
-      className="block rounded-2xl border border-border bg-card p-4 transition-transform active:scale-[0.99]"
+      className={`block rounded-2xl border p-4 transition-transform active:scale-[0.99] ${
+        open ? tier.card : "border-border bg-card"
+      }`}
     >
       <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wide">
         <span className="rounded-full bg-surface-2 px-2 py-0.5 text-muted-foreground">
@@ -21,14 +29,34 @@ export function PredictionCard({ prediction }: { prediction: FeedPrediction }) {
         )}
         <span
           className={`ml-auto rounded-full px-2 py-0.5 ${
-            open ? "bg-success/15 text-success" : "bg-muted text-muted-foreground"
+            open ? tier.badge : "bg-muted text-muted-foreground"
           }`}
         >
-          {open ? "Live" : prediction.status}
+          {open ? tier.label : prediction.status}
         </span>
       </div>
 
       <h3 className="mt-2 font-display text-base font-bold leading-snug">{prediction.question}</h3>
+
+      {open && (
+        <div className="mt-3">
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
+            <div
+              className={`h-full rounded-full transition-all ${
+                tier.level === "panic" || tier.level === "hot"
+                  ? "bg-panic"
+                  : tier.level === "warm"
+                    ? "bg-warning"
+                    : "bg-primary"
+              }`}
+              style={{ width: `${Math.max(6, heat)}%` }}
+            />
+          </div>
+          <p className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+            Panic meter · {heat}%
+          </p>
+        </div>
+      )}
 
       <div className="mt-3 grid grid-cols-2 gap-2">
         {prediction.outcomes.map((outcome) => {
@@ -43,8 +71,12 @@ export function PredictionCard({ prediction }: { prediction: FeedPrediction }) {
             >
               <p className="truncate text-xs font-semibold">{outcome.label}</p>
               <p className="text-[11px] text-muted-foreground tabular">
-                {payoutMultiplier(prediction.outcome_totals, outcome.key, prediction.outcomes).toFixed(2)}× ·{" "}
-                {share}%
+                {payoutMultiplier(
+                  prediction.outcome_totals,
+                  outcome.key,
+                  prediction.outcomes,
+                ).toFixed(2)}
+                × · {share}%
               </p>
             </div>
           );
@@ -58,8 +90,9 @@ export function PredictionCard({ prediction }: { prediction: FeedPrediction }) {
         <span className="flex items-center gap-1">
           <Coins className="size-3.5" /> {formatNim(prediction.total_staked_nim)} NIM
         </span>
-        <span className="ml-auto font-semibold text-primary">
-          <Countdown target={prediction.lock_time} />
+        <span className="ml-auto font-semibold">
+          {open && tier.level === "panic" && <span className="mr-1">Last call</span>}
+          <Countdown target={prediction.lock_time} urgent />
         </span>
       </div>
     </Link>

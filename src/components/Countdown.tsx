@@ -1,7 +1,17 @@
 import { useEffect, useState } from "react";
 import { formatCountdown, msLeft } from "@/lib/nim";
+import { panicTier } from "@/lib/panic";
 
-export function Countdown({ target, className }: { target: string; className?: string }) {
+export function Countdown({
+  target,
+  className,
+  urgent = false,
+}: {
+  target: string;
+  className?: string;
+  /** When true, the countdown colours and blinks itself as the lock closes in. */
+  urgent?: boolean;
+}) {
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -10,7 +20,11 @@ export function Countdown({ target, className }: { target: string; className?: s
   }, []);
 
   const remaining = msLeft(target, now);
+  const tier = panicTier(remaining);
+
   return (
-    <span className={className}>{remaining <= 0 ? "Locked" : formatCountdown(remaining)}</span>
+    <span className={`${urgent ? tier.text : ""} ${className ?? ""}`.trim()}>
+      {remaining <= 0 ? "Locked" : formatCountdown(remaining)}
+    </span>
   );
 }

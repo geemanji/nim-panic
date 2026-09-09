@@ -1,5 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Flame, Home, ListChecks, Trophy, User, Wallet } from "lucide-react";
+import { Flame, Home, LayoutDashboard, ListChecks, Trophy, User, Wallet } from "lucide-react";
 import type { ReactNode } from "react";
 import { shortenAddress } from "@/lib/nim";
 import { useWallet } from "@/hooks/useWallet";
@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 
 const TABS = [
   { to: "/", label: "Home", icon: Home },
-  { to: "/picks", label: "My Picks", icon: ListChecks },
+  { to: "/dashboard", label: "Dash", icon: LayoutDashboard },
+  { to: "/picks", label: "Picks", icon: ListChecks },
   { to: "/leaderboard", label: "Ranks", icon: Trophy },
   { to: "/profile", label: "Profile", icon: User },
 ] as const;

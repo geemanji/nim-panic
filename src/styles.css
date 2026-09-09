@@ -139,3 +139,47 @@
 @utility tabular {
   font-variant-numeric: tabular-nums;
 }
+
+@keyframes panic-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-1.5px);
+  }
+  75% {
+    transform: translateX(1.5px);
+  }
+}
+
+@keyframes panic-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@keyframes panic-ring {
+  0% {
+    box-shadow: 0 0 0 0 oklch(0.66 0.24 12 / 45%);
+  }
+  100% {
+    box-shadow: 0 0 0 10px oklch(0.66 0.24 12 / 0%);
+  }
+}
+
+@utility panic-shake {
+  animation: panic-shake 0.45s ease-in-out infinite;
+}
+
+@utility panic-blink {
+  animation: panic-blink 1s ease-in-out infinite;
+}
+
+@utility panic-ring {
+  animation: panic-ring 1.6s ease-out infinite;
+}

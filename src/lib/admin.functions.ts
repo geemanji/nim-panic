@@ -254,6 +254,140 @@ export const adminRetryPayouts = createServerFn({ method: "POST" })
     return { sent };
   });
 
+/** Admin-only treasury health, balance, and queued payout totals. */
+export const adminTreasuryInfo = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const supabaseAdmin = await assertAdmin(context.userId);
+    const { getBalanceLuna, getNimiqConfig } = await import("./nimiq-rpc.server");
+    const { lunaToNim } = await import("./nim");
+    const config = getNimiqConfig();
+
+    const { data: queued } = await supabaseAdmin
+      .from("settlements")
+      .select("payout_nim, status")
+      .in("status", ["PENDING_PAYOUT", "FAILED"]);
+    const pendingRows = queued ?? [];
+    let balanceNim: number | null = null;
+    let balanceError: string | null = null;
+
+    if (config.treasuryAddress && config.rpcUrl) {
+      try {
+        balanceNim = lunaToNim(await getBalanceLuna(config.treasuryAddress));
+      } catch {
+        balanceError = "Treasury balance is temporarily unavailable.";
+      }
+    }
+
+    return {
+      network: config.network,
+      address: config.treasuryAddress,
+      configured: config.treasuryConfigured,
+      payoutsEnabled: config.payoutsEnabled,
+      balanceNim,
+      balanceError,
+      pendingCount: pendingRows.length,
+      pendingNim: pendingRows.reduce((sum, row) => sum + Number(row.payout_nim), 0),
+    };
+  });
+
+/** Settled-market payout history, grouped for the operator console. */
+export const adminPayoutHistory = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const supabaseAdmin = await assertAdmin(context.userId);
+    const { data: settlements } = await supabaseAdmin
+      .from("settlements")
+      .select(
+        "id, payout_nim, status, transaction_hash, error_message, created_at, paid_at, prediction_entries!inner(id, user_id, prediction_id, outcome, stake_nim, predictions!inner(id, question, category, status, winning_outcome))",
+      )
+      .gt("payout_nim", 0)
+      .order("created_at", { ascending: false })
+      .limit(250);
+
+    const rows = settlements ?? [];
+    const userIds = [
+      ...new Set(
+        rows.map((row) =>
+          String((row.prediction_entries as unknown as { user_id: string }).user_id),
+        ),
+      ),
+    ];
+    const { data: profiles } = userIds.length
+      ? await supabaseAdmin
+          .from("profiles")
+          .select("id, username, wallet_address")
+          .in("id", userIds)
+      : { data: [] };
+    const players = new Map((profiles ?? []).map((profile) => [profile.id, profile]));
+
+    const markets = new Map<
+      string,
+      {
+        id: string;
+        question: string;
+        category: string;
+        winningOutcome: string | null;
+        totalPaidNim: number;
+        winners: {
+          id: string;
+          username: string;
+          walletAddress: string;
+          outcome: string;
+          stakeNim: number;
+          payoutNim: number;
+          status: string;
+          transactionHash: string | null;
+          paidAt: string | null;
+          errorMessage: string | null;
+        }[];
+      }
+    >();
+
+    for (const row of rows) {
+      const entry = row.prediction_entries as unknown as {
+        user_id: string;
+        outcome: string;
+        stake_nim: number;
+        predictions: {
+          id: string;
+          question: string;
+          category: string;
+          status: string;
+          winning_outcome: string | null;
+        };
+      };
+      const prediction = entry.predictions;
+      if (prediction.status !== "SETTLED") continue;
+      const profile = players.get(entry.user_id);
+      const market = markets.get(prediction.id) ?? {
+        id: prediction.id,
+        question: prediction.question,
+        category: prediction.category,
+        winningOutcome: prediction.winning_outcome,
+        totalPaidNim: 0,
+        winners: [],
+      };
+      const payoutNim = Number(row.payout_nim);
+      market.totalPaidNim += row.status === "SENT" ? payoutNim : 0;
+      market.winners.push({
+        id: row.id,
+        username: profile?.username ?? "Player",
+        walletAddress: profile?.wallet_address ?? "Unknown wallet",
+        outcome: entry.outcome,
+        stakeNim: Number(entry.stake_nim),
+        payoutNim,
+        status: row.status,
+        transactionHash: row.transaction_hash,
+        paidAt: row.paid_at,
+        errorMessage: row.error_message,
+      });
+      markets.set(prediction.id, market);
+    }
+
+    return [...markets.values()];
+  });
+
 /** Tells the console whether this wallet is an admin, and whether bootstrap is still open. */
 export const adminAccess = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])

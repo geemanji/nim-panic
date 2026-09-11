@@ -1,10 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { CheckCircle2, CircleDollarSign, History, Landmark, Send } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useWallet } from "@/hooks/useWallet";
 import {
@@ -14,11 +16,13 @@ import {
   adminListPredictions,
   adminLockPrediction,
   adminOpenMarket,
+  adminPayoutHistory,
   adminResolvePrediction,
   adminRetryPayouts,
   adminSettlePrediction,
+  adminTreasuryInfo,
 } from "@/lib/admin.functions";
-import { formatNim, shortenAddress } from "@/lib/nim";
+import { formatNim, nimToLuna, shortenAddress } from "@/lib/nim";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -107,6 +111,20 @@ function AdminPage() {
     retry: false,
   });
 
+  const treasury = useQuery({
+    queryKey: ["admin-treasury"],
+    queryFn: () => adminTreasuryInfo(),
+    enabled: Boolean(access.data?.isAdmin),
+    retry: false,
+  });
+
+  const history = useQuery({
+    queryKey: ["admin-payout-history"],
+    queryFn: () => adminPayoutHistory(),
+    enabled: Boolean(access.data?.isAdmin),
+    retry: false,
+  });
+
   const [preset, setPreset] = useState<(typeof TEMPLATES)[number] | null>(null);
 
   const refresh = () => queryClient.invalidateQueries();
@@ -127,6 +145,25 @@ function AdminPage() {
       refresh();
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Retry failed"),
+  });
+
+  const [fundAmount, setFundAmount] = useState("100");
+  const fund = useMutation({
+    mutationFn: async () => {
+      const amount = Number(fundAmount);
+      if (!treasury.data?.address) throw new Error("Configure the treasury address first.");
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a valid NIM amount.");
+      return wallet.sendStake({
+        recipient: treasury.data.address,
+        valueLuna: nimToLuna(amount),
+        memo: "NIM PANIC TREASURY",
+      });
+    },
+    onSuccess: () => {
+      toast.success("Treasury funding sent");
+      setTimeout(refresh, 2500);
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Funding failed"),
   });
 
   if (!wallet.signedIn) {
@@ -181,54 +218,226 @@ function AdminPage() {
         {access.data.wallet ? ` Signed in as ${shortenAddress(access.data.wallet)}.` : ""}
       </p>
 
-      <section className="mt-5">
-        <h2 className="mb-2 font-display text-sm font-bold uppercase tracking-wide">
-          Question templates
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          {TEMPLATES.map((template) => (
-            <Button
-              key={template.label}
-              size="sm"
-              variant="secondary"
-              onClick={() => {
-                setPreset(template);
-                toast.success(`Loaded "${template.label}" — review and create`);
-              }}
-            >
-              {template.label}
-            </Button>
-          ))}
+      <Tabs defaultValue="markets" className="mt-5">
+        <TabsList className="grid h-11 w-full grid-cols-3">
+          <TabsTrigger value="markets">Markets</TabsTrigger>
+          <TabsTrigger value="treasury">Treasury</TabsTrigger>
+          <TabsTrigger value="payouts">Payouts</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="markets" className="mt-5">
+          <section>
+            <h2 className="mb-2 font-display text-sm font-bold uppercase tracking-wide">
+              Question templates
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {TEMPLATES.map((template) => (
+                <Button
+                  key={template.label}
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setPreset(template);
+                    toast.success(`Loaded "${template.label}" — review and create`);
+                  }}
+                >
+                  {template.label}
+                </Button>
+              ))}
+            </div>
+          </section>
+
+          <CreateForm preset={preset} onDone={refresh} />
+
+          <section className="mt-6">
+            <h2 className="mb-2 font-display text-sm font-bold uppercase tracking-wide">Markets</h2>
+            {list.isLoading && <p className="text-sm text-muted-foreground">Loading markets…</p>}
+            <div className="space-y-3">
+              {(list.data ?? []).map((row) => (
+                <AdminRow key={row.id} row={row} onDone={refresh} />
+              ))}
+            </div>
+            {!list.isLoading && (list.data ?? []).length === 0 && (
+              <p className="rounded-2xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
+                No markets yet. Create the first one above.
+              </p>
+            )}
+          </section>
+        </TabsContent>
+
+        <TabsContent value="treasury" className="mt-5">
+          <TreasuryPanel
+            data={treasury.data}
+            loading={treasury.isLoading}
+            amount={fundAmount}
+            onAmount={setFundAmount}
+            onFund={() => fund.mutate()}
+            funding={fund.isPending}
+            onPay={() => retry.mutate()}
+            paying={retry.isPending}
+          />
+        </TabsContent>
+
+        <TabsContent value="payouts" className="mt-5">
+          <PayoutHistory data={history.data ?? []} loading={history.isLoading} />
+        </TabsContent>
+      </Tabs>
+    </AppShell>
+  );
+}
+
+type TreasuryData = Awaited<ReturnType<typeof adminTreasuryInfo>>;
+
+function TreasuryPanel({
+  data,
+  loading,
+  amount,
+  onAmount,
+  onFund,
+  funding,
+  onPay,
+  paying,
+}: {
+  data: TreasuryData | undefined;
+  loading: boolean;
+  amount: string;
+  onAmount: (value: string) => void;
+  onFund: () => void;
+  funding: boolean;
+  onPay: () => void;
+  paying: boolean;
+}) {
+  if (loading) return <p className="text-sm text-muted-foreground">Loading treasury…</p>;
+  if (!data) return <p className="text-sm text-destructive">Treasury information is unavailable.</p>;
+
+  return (
+    <div className="space-y-4">
+      <section className="rounded-2xl border border-border bg-card p-4">
+        <div className="flex items-center justify-between gap-3">
+          <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+            <Landmark className="size-5" />
+          </span>
+          <span className="rounded-full bg-surface px-2 py-1 text-[10px] font-bold uppercase text-muted-foreground">
+            {data.network}net
+          </span>
         </div>
+        <p className="mt-5 text-xs uppercase text-muted-foreground">Available balance</p>
+        <p className="mt-1 font-display text-3xl font-bold tabular">
+          {data.balanceNim == null ? "—" : formatNim(data.balanceNim, 5)} NIM
+        </p>
+        <p className="mt-2 break-all text-xs text-muted-foreground">
+          {data.address ?? "Treasury address not configured"}
+        </p>
+        {data.balanceError && <p className="mt-2 text-xs text-warning">{data.balanceError}</p>}
       </section>
 
-      <CreateForm preset={preset} onDone={refresh} />
-
-      <section className="mt-6">
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="font-display text-sm font-bold uppercase tracking-wide">Markets</h2>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => retry.mutate()}
-            disabled={retry.isPending}
-          >
-            {retry.isPending ? "Retrying…" : "Retry payouts"}
-          </Button>
+      <section className="rounded-2xl border border-border bg-card p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="font-display text-sm font-bold">Pending winner payouts</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {data.pendingCount} payments · {formatNim(data.pendingNim, 5)} NIM queued
+            </p>
+          </div>
+          <CircleDollarSign className="size-5 text-primary" />
         </div>
-        {list.isLoading && <p className="text-sm text-muted-foreground">Loading markets…</p>}
-        <div className="space-y-3">
-          {(list.data ?? []).map((row) => (
-            <AdminRow key={row.id} row={row} onDone={refresh} />
-          ))}
-        </div>
-        {!list.isLoading && (list.data ?? []).length === 0 && (
-          <p className="rounded-2xl border border-border bg-card p-6 text-center text-sm text-muted-foreground">
-            No markets yet. Create the first one above.
+        {!data.payoutsEnabled && (
+          <p className="mt-3 rounded-lg bg-surface p-3 text-xs text-warning">
+            Automatic payouts need the treasury wallet passphrase in secure configuration.
           </p>
         )}
+        <Button
+          className="mt-4 w-full"
+          onClick={onPay}
+          disabled={paying || data.pendingCount === 0 || !data.payoutsEnabled}
+        >
+          <Send className="size-4" />
+          {paying ? "Paying winners…" : "Pay pending winners"}
+        </Button>
       </section>
-    </AppShell>
+
+      <section className="rounded-2xl border border-border bg-card p-4">
+        <h2 className="font-display text-sm font-bold">Fund treasury</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Send NIM from your connected wallet into the market treasury.
+        </p>
+        <div className="mt-3 flex gap-2">
+          <Input
+            value={amount}
+            onChange={(event) => onAmount(event.target.value)}
+            inputMode="decimal"
+            aria-label="Funding amount in NIM"
+            placeholder="100"
+          />
+          <Button onClick={onFund} disabled={funding || !data.configured}>
+            {funding ? "Sending…" : "Fund"}
+          </Button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+type PayoutMarkets = Awaited<ReturnType<typeof adminPayoutHistory>>;
+
+function PayoutHistory({ data, loading }: { data: PayoutMarkets; loading: boolean }) {
+  if (loading) return <p className="text-sm text-muted-foreground">Loading payouts…</p>;
+  if (data.length === 0) {
+    return (
+      <div className="rounded-2xl border border-border bg-card p-6 text-center">
+        <History className="mx-auto size-6 text-muted-foreground" />
+        <p className="mt-2 text-sm font-semibold">No settled payouts yet</p>
+        <p className="mt-1 text-xs text-muted-foreground">Winner payments will appear here.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {data.map((market) => (
+        <section key={market.id} className="rounded-2xl border border-border bg-card p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-bold uppercase text-muted-foreground">{market.category}</p>
+              <h2 className="mt-1 font-display text-sm font-bold leading-snug">{market.question}</h2>
+            </div>
+            <span className="shrink-0 text-xs font-bold text-success tabular">
+              {formatNim(market.totalPaidNim, 5)} NIM
+            </span>
+          </div>
+          <div className="mt-3 divide-y divide-border">
+            {market.winners.map((winner) => (
+              <div key={winner.id} className="py-3 first:pt-0 last:pb-0">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold">{winner.username}</p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {shortenAddress(winner.walletAddress)} · {formatNim(winner.stakeNim)} NIM stake
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-sm font-bold tabular">{formatNim(winner.payoutNim, 5)} NIM</p>
+                    <p className={winner.status === "SENT" ? "text-[10px] text-success" : "text-[10px] text-warning"}>
+                      {winner.status === "SENT" ? "Paid" : "Pending"}
+                    </p>
+                  </div>
+                </div>
+                {winner.status === "SENT" && (
+                  <p className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <CheckCircle2 className="size-3 text-success" />
+                    {winner.paidAt ? new Date(winner.paidAt).toLocaleString() : "Sent"}
+                    {winner.transactionHash ? ` · ${winner.transactionHash.slice(0, 10)}…` : ""}
+                  </p>
+                )}
+                {winner.status !== "SENT" && winner.errorMessage && (
+                  <p className="mt-1 text-[10px] text-warning">{winner.errorMessage}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
   );
 }
 

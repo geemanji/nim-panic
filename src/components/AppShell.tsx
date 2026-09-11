@@ -51,7 +51,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main className="flex-1 px-4 pb-28 pt-4">{children}</main>
 
       <nav className="fixed bottom-0 left-1/2 z-20 w-full max-w-md -translate-x-1/2 border-t border-border bg-background/95 backdrop-blur">
-        <ul className="grid grid-cols-4">
+        <ul className="grid grid-cols-5">
           {TABS.map((tab) => {
             const active = tab.to === "/" ? pathname === "/" : pathname.startsWith(tab.to);
             const Icon = tab.icon;

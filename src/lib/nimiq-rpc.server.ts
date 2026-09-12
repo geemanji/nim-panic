@@ -1,27 +1,26 @@
 /**
  * Server-only Nimiq JSON-RPC client + game configuration.
  *
- * Configuration comes from environment variables and defaults to testnet:
- *   NIMIQ_NETWORK              "test" (default) | "main"
- *   NIMIQ_RPC_URL_TEST         RPC endpoint used when network = test
- *   NIMIQ_RPC_URL_MAIN         RPC endpoint used when network = main
- *   NIMIQ_RPC_AUTH             optional "user:password" for basic auth
- *   NIM_PANIC_TREASURY_ADDRESS NQ address that receives stakes
- *   NIM_PANIC_TREASURY_WALLET_PASSPHRASE  optional; enables automated payouts
- *   NIM_PANIC_ADMIN_ADDRESSES  comma separated NQ addresses allowed to admin
+ * Always operates on testnet. Configuration via environment variables:
+ *   NIMIQ_RPC_URL              Testnet RPC endpoint (default: https://rpc-testnet.nimiqwatch.com)
+ *   NIMIQ_RPC_AUTH             optional "user:password" for basic auth on the RPC node
+ *   NIM_PANIC_TREASURY_ADDRESS NQ address that receives stakes and sends payouts
+ *   NIM_PANIC_ADMIN_ADDRESSES  comma-separated NQ addresses allowed to admin
+ *
+ * Payouts are enabled whenever both NIMIQ_RPC_URL and NIM_PANIC_TREASURY_ADDRESS are
+ * set. The treasury account must already be imported into the connected node without a
+ * passphrase lock (or the node must hold an unlocked hot-wallet key) — no passphrase is
+ * required or accepted by this application.
  */
 import { normalizeAddress, isValidNimiqAddress } from "./nimiq-crypto.server";
 
 const PLACEHOLDER_TREASURY = "NQ07000000000000000000000000000000000";
 
-/** Public fallback endpoints so on-chain verification works without a private node. */
-const DEFAULT_RPC_URL = {
-  test: "https://rpc-testnet.nimiqwatch.com",
-  main: "https://rpc.nimiqwatch.com",
-} as const;
+/** Fallback public testnet endpoint so on-chain verification works without a private node. */
+const DEFAULT_RPC_URL_TEST = "https://rpc.testnet.nimiqwatch.com";
 
 export type NimiqConfig = {
-  network: "test" | "main";
+  network: "test";
   rpcUrl: string | null;
   rpcAuth: string | null;
   treasuryAddress: string | null;
@@ -30,24 +29,22 @@ export type NimiqConfig = {
 };
 
 export function getNimiqConfig(): NimiqConfig {
-  const network = (process.env["NIMIQ_NETWORK"] ?? "test").toLowerCase() === "main" ? "main" : "test";
-  const rpcUrl =
-    (network === "main" ? process.env["NIMIQ_RPC_URL_MAIN"] : process.env["NIMIQ_RPC_URL_TEST"]) ??
-    DEFAULT_RPC_URL[network];
+  const rpcUrl = process.env["NIMIQ_RPC_URL"] ?? DEFAULT_RPC_URL_TEST;
   const rawTreasury = process.env["NIM_PANIC_TREASURY_ADDRESS"] ?? "";
   const treasury = normalizeAddress(rawTreasury);
   const treasuryConfigured =
     treasury.length > 0 && treasury !== PLACEHOLDER_TREASURY && isValidNimiqAddress(treasury);
+  const resolvedRpcUrl = rpcUrl.trim().length > 0 ? rpcUrl.trim() : null;
 
   return {
-    network,
-    rpcUrl: rpcUrl && rpcUrl.trim().length > 0 ? rpcUrl.trim() : null,
+    network: "test",
+    rpcUrl: resolvedRpcUrl,
     rpcAuth: process.env["NIMIQ_RPC_AUTH"] ?? null,
     treasuryAddress: treasuryConfigured ? treasury : null,
     treasuryConfigured,
-    payoutsEnabled: Boolean(
-      rpcUrl && treasuryConfigured && process.env["NIM_PANIC_TREASURY_WALLET_PASSPHRASE"],
-    ),
+    // Payouts work as long as the RPC node is reachable and the treasury address is set.
+    // The node is expected to hold the treasury key without a passphrase lock.
+    payoutsEnabled: Boolean(resolvedRpcUrl && treasuryConfigured),
   };
 }
 
@@ -110,7 +107,8 @@ export async function getTransaction(hash: string): Promise<ChainTransaction | n
   try {
     const tx = await rpc<Record<string, unknown> | null>("getTransactionByHash", [hash]);
     if (!tx) return null;
-    const senderData = (tx["data"] ?? tx["senderData"] ?? tx["recipientData"]) as string | undefined;
+    const senderData = (tx["data"] ?? tx["senderData"] ?? tx["recipientData"]) as
+      string | undefined;
     return {
       hash: String(tx["hash"] ?? hash),
       from: String(tx["from"] ?? ""),
@@ -134,19 +132,21 @@ export async function getBalanceLuna(address: string): Promise<number> {
   return Number(account?.balance ?? 0);
 }
 
-/** Sends NIM from the treasury wallet held by the configured node. */
+/**
+ * Sends NIM from the treasury wallet held by the configured testnet node.
+ *
+ * The treasury account must be imported into the node as an unlocked hot-wallet key.
+ * No passphrase unlock step is performed by the application.
+ */
 export async function sendFromTreasury(params: {
   recipient: string;
   valueLuna: number;
   data?: string;
 }): Promise<string> {
   const config = getNimiqConfig();
-  const passphrase = process.env["NIM_PANIC_TREASURY_WALLET_PASSPHRASE"];
-  if (!config.rpcUrl || !config.treasuryAddress || !passphrase) {
+  if (!config.rpcUrl || !config.treasuryAddress) {
     throw new RpcUnavailableError("Automated payouts are not configured");
   }
-
-  await rpc("unlockAccount", [config.treasuryAddress, passphrase, 60]);
 
   if (params.data) {
     return rpc<string>("sendBasicTransactionWithData", [

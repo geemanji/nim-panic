@@ -31,3 +31,11 @@ dist-ssr
 *.sln
 *.sw?
 .env
+.env.*
+!.env.example
+
+# Kiro IDE settings (may contain API keys / MCP tokens)
+.kiro/
+
+# Lovable project metadata
+.lovable/

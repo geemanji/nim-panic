@@ -56,7 +56,7 @@ export const getFeed = createServerFn({ method: "GET" }).handler(async () => {
 });
 
 export const getPrediction = createServerFn({ method: "GET" })
-  .inputValidator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
+  .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { syncPredictionStates } = await import("./lifecycle.server");
@@ -163,7 +163,7 @@ export const getWalletBalance = createServerFn({ method: "POST" })
 /** Creates a PENDING_PAYMENT entry and returns the exact payment to make. */
 export const createEntry = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({
         predictionId: z.string().uuid(),
@@ -256,7 +256,7 @@ export const createEntry = createServerFn({ method: "POST" })
 /** Verifies the on-chain payment before an entry is ever reported as confirmed. */
 export const confirmEntry = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((data: unknown) =>
+  .validator((data: unknown) =>
     z
       .object({ entryId: z.string().uuid(), transactionHash: z.string().min(16).max(128) })
       .parse(data),

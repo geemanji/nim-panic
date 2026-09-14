@@ -15,7 +15,7 @@ const TABS = [
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const { address, signedIn, connecting, connect, providerState } = useWallet();
+  const { address, signedIn, connecting, connect, backend } = useWallet();
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-background">
@@ -36,16 +36,11 @@ export function AppShell({ children }: { children: ReactNode }) {
               {shortenAddress(address)}
             </span>
           ) : (
-            <Button size="sm" onClick={connect} disabled={connecting || providerState === "loading"}>
-              {connecting ? "Connecting…" : "Connect"}
+            <Button size="sm" onClick={connect} disabled={connecting || backend === null}>
+              {connecting ? "Connecting…" : backend === "hub" ? "Connect Wallet" : "Connect"}
             </Button>
           )}
         </div>
-        {providerState === "unavailable" && (
-          <p className="mt-2 rounded-lg bg-surface px-3 py-2 text-[11px] leading-snug text-muted-foreground">
-            Browsing mode — open NIM Panic inside Nimiq Pay to connect your wallet and stake NIM.
-          </p>
-        )}
       </header>
 
       <main className="flex-1 px-4 pb-28 pt-4">{children}</main>

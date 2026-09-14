@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "nimiq-developer-center": {
+      "type": "http",
+      "url": "https://nimiq.com/developers/mcp"
+    }
+  }
+}

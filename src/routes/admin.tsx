@@ -153,7 +153,7 @@ function AdminPage() {
       const amount = Number(fundAmount);
       if (!treasury.data?.address) throw new Error("Configure the treasury address first.");
       if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a valid NIM amount.");
-      return wallet.sendStake({
+      return wallet.sendTransaction({
         recipient: treasury.data.address,
         valueLuna: nimToLuna(amount),
         memo: "NIM PANIC TREASURY",
@@ -162,6 +162,7 @@ function AdminPage() {
     onSuccess: () => {
       toast.success("Treasury funding sent");
       setTimeout(refresh, 2500);
+      queryClient.invalidateQueries({ queryKey: ["wallet-balance"] });
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Funding failed"),
   });
@@ -308,7 +309,8 @@ function TreasuryPanel({
   paying: boolean;
 }) {
   if (loading) return <p className="text-sm text-muted-foreground">Loading treasury…</p>;
-  if (!data) return <p className="text-sm text-destructive">Treasury information is unavailable.</p>;
+  if (!data)
+    return <p className="text-sm text-destructive">Treasury information is unavailable.</p>;
 
   return (
     <div className="space-y-4">
@@ -398,8 +400,12 @@ function PayoutHistory({ data, loading }: { data: PayoutMarkets; loading: boolea
         <section key={market.id} className="rounded-2xl border border-border bg-card p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="text-[10px] font-bold uppercase text-muted-foreground">{market.category}</p>
-              <h2 className="mt-1 font-display text-sm font-bold leading-snug">{market.question}</h2>
+              <p className="text-[10px] font-bold uppercase text-muted-foreground">
+                {market.category}
+              </p>
+              <h2 className="mt-1 font-display text-sm font-bold leading-snug">
+                {market.question}
+              </h2>
             </div>
             <span className="shrink-0 text-xs font-bold text-success tabular">
               {formatNim(market.totalPaidNim, 5)} NIM
@@ -412,12 +418,21 @@ function PayoutHistory({ data, loading }: { data: PayoutMarkets; loading: boolea
                   <div className="min-w-0">
                     <p className="truncate text-sm font-semibold">{winner.username}</p>
                     <p className="text-[10px] text-muted-foreground">
-                      {shortenAddress(winner.walletAddress)} · {formatNim(winner.stakeNim)} NIM stake
+                      {shortenAddress(winner.walletAddress)} · {formatNim(winner.stakeNim)} NIM
+                      stake
                     </p>
                   </div>
                   <div className="shrink-0 text-right">
-                    <p className="text-sm font-bold tabular">{formatNim(winner.payoutNim, 5)} NIM</p>
-                    <p className={winner.status === "SENT" ? "text-[10px] text-success" : "text-[10px] text-warning"}>
+                    <p className="text-sm font-bold tabular">
+                      {formatNim(winner.payoutNim, 5)} NIM
+                    </p>
+                    <p
+                      className={
+                        winner.status === "SENT"
+                          ? "text-[10px] text-success"
+                          : "text-[10px] text-warning"
+                      }
+                    >
                       {winner.status === "SENT" ? "Paid" : "Pending"}
                     </p>
                   </div>
@@ -664,11 +679,7 @@ function CreateForm({
           />
         </Field>
         <Field label="Description (optional)">
-          <Textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            rows={2}
-          />
+          <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} />
         </Field>
         <Field label="Category">
           <Input value={category} onChange={(e) => setCategory(e.target.value)} />

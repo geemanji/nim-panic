@@ -183,3 +183,100 @@
 @utility panic-ring {
   animation: panic-ring 1.6s ease-out infinite;
 }
+
+/* ─── Category accent colours ─────────────────────────────────────────────── */
+:root {
+  --cat-sports: oklch(0.72 0.2 145); /* green   */
+  --cat-crypto: oklch(0.84 0.18 88); /* yellow  — matches --primary */
+  --cat-esports: oklch(0.62 0.22 285); /* violet  */
+  --cat-tech: oklch(0.68 0.18 220); /* cyan    */
+  --cat-culture: oklch(0.72 0.2 12); /* coral   */
+  --cat-world: oklch(0.68 0.14 260); /* blue    */
+}
+
+@theme inline {
+  --color-cat-sports: var(--cat-sports);
+  --color-cat-crypto: var(--cat-crypto);
+  --color-cat-esports: var(--cat-esports);
+  --color-cat-tech: var(--cat-tech);
+  --color-cat-culture: var(--cat-culture);
+  --color-cat-world: var(--cat-world);
+}
+
+/* ─── New game-UI utilities ───────────────────────────────────────────────── */
+
+@keyframes score-pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@utility score-pop {
+  animation: score-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility slide-up {
+  animation: slide-up 0.25s ease-out both;
+}
+
+@keyframes win-flash {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  30% {
+    background-color: oklch(0.74 0.18 155 / 25%);
+  }
+}
+
+@utility win-flash {
+  animation: win-flash 0.7s ease-out;
+}
+
+@keyframes loss-flash {
+  0%,
+  100% {
+    background-color: transparent;
+  }
+  30% {
+    background-color: oklch(0.62 0.23 24 / 25%);
+  }
+}
+
+@utility loss-flash {
+  animation: loss-flash 0.7s ease-out;
+}
+
+/* Streak flame glow */
+@utility streak-glow {
+  text-shadow: 0 0 8px oklch(0.84 0.18 88 / 80%);
+}
+
+/* Category card hover lift */
+@utility cat-lift {
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.cat-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px -8px oklch(0 0 0 / 40%);
+}

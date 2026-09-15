@@ -54,8 +54,22 @@ export function useNimiq() {
     [requireProvider],
   );
 
-  const sendStake = useCallback(
-    async (params: { recipient: string; valueLuna: number; memo: string }) => {
+  /**
+   * Signs a prediction entry message using the wallet.
+   * Returns { publicKey, signature } — both hex strings.
+   * The server verifies the signature with the user's registered address.
+   */
+  const signPrediction = useCallback(
+    async (message: string) => unwrap(await requireProvider().sign(message)),
+    [requireProvider],
+  );
+
+  /**
+   * Sends a basic NIM transaction with embedded data field.
+   * Used for treasury funding and other direct payments.
+   */
+  const sendTransaction = useCallback(
+    async (params: { recipient: string; valueLuna: number; memo: string }): Promise<string> => {
       const result = unwrap(
         await requireProvider().sendBasicTransactionWithData({
           recipient: params.recipient,
@@ -68,5 +82,12 @@ export function useNimiq() {
     [requireProvider],
   );
 
-  return { state, available: state === "ready", listAccounts, signMessage, sendStake };
+  return {
+    state,
+    available: state === "ready",
+    listAccounts,
+    signMessage,
+    signPrediction,
+    sendTransaction,
+  };
 }

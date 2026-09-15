@@ -14,7 +14,9 @@ import { Route as AdminRouteImport } from './routes/admin'
 import { Route as DashboardRouteImport } from './routes/dashboard'
 import { Route as LeaderboardRouteImport } from './routes/leaderboard'
 import { Route as PicksRouteImport } from './routes/picks'
+import { Route as PlayRouteImport } from './routes/play'
 import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as CategorySlugRouteImport } from './routes/category.$slug'
 import { Route as PIdRouteImport } from './routes/p.$id'
 
 const IndexRoute = IndexRouteImport.update({
@@ -42,9 +44,19 @@ const PicksRoute = PicksRouteImport.update({
   path: '/picks',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PlayRoute = PlayRouteImport.update({
+  id: '/play',
+  path: '/play',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProfileRoute = ProfileRouteImport.update({
   id: '/profile',
   path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CategorySlugRoute = CategorySlugRouteImport.update({
+  id: '/category/$slug',
+  path: '/category/$slug',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PIdRoute = PIdRouteImport.update({
@@ -59,7 +71,9 @@ export interface FileRoutesByFullPath {
   '/dashboard': typeof DashboardRoute
   '/leaderboard': typeof LeaderboardRoute
   '/picks': typeof PicksRoute
+  '/play': typeof PlayRoute
   '/profile': typeof ProfileRoute
+  '/category/$slug': typeof CategorySlugRoute
   '/p/$id': typeof PIdRoute
 }
 export interface FileRoutesByTo {
@@ -68,7 +82,9 @@ export interface FileRoutesByTo {
   '/dashboard': typeof DashboardRoute
   '/leaderboard': typeof LeaderboardRoute
   '/picks': typeof PicksRoute
+  '/play': typeof PlayRoute
   '/profile': typeof ProfileRoute
+  '/category/$slug': typeof CategorySlugRoute
   '/p/$id': typeof PIdRoute
 }
 export interface FileRoutesById {
@@ -78,7 +94,9 @@ export interface FileRoutesById {
   '/dashboard': typeof DashboardRoute
   '/leaderboard': typeof LeaderboardRoute
   '/picks': typeof PicksRoute
+  '/play': typeof PlayRoute
   '/profile': typeof ProfileRoute
+  '/category/$slug': typeof CategorySlugRoute
   '/p/$id': typeof PIdRoute
 }
 export interface FileRouteTypes {
@@ -89,7 +107,9 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/leaderboard'
     | '/picks'
+    | '/play'
     | '/profile'
+    | '/category/$slug'
     | '/p/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -98,7 +118,9 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/leaderboard'
     | '/picks'
+    | '/play'
     | '/profile'
+    | '/category/$slug'
     | '/p/$id'
   id:
     | '__root__'
@@ -107,7 +129,9 @@ export interface FileRouteTypes {
     | '/dashboard'
     | '/leaderboard'
     | '/picks'
+    | '/play'
     | '/profile'
+    | '/category/$slug'
     | '/p/$id'
   fileRoutesById: FileRoutesById
 }
@@ -117,7 +141,9 @@ export interface RootRouteChildren {
   DashboardRoute: typeof DashboardRoute
   LeaderboardRoute: typeof LeaderboardRoute
   PicksRoute: typeof PicksRoute
+  PlayRoute: typeof PlayRoute
   ProfileRoute: typeof ProfileRoute
+  CategorySlugRoute: typeof CategorySlugRoute
   PIdRoute: typeof PIdRoute
 }
 
@@ -158,11 +184,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PicksRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/play': {
+      id: '/play'
+      path: '/play'
+      fullPath: '/play'
+      preLoaderRoute: typeof PlayRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/profile': {
       id: '/profile'
       path: '/profile'
       fullPath: '/profile'
       preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/category/$slug': {
+      id: '/category/$slug'
+      path: '/category/$slug'
+      fullPath: '/category/$slug'
+      preLoaderRoute: typeof CategorySlugRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/p/$id': {
@@ -181,7 +221,9 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardRoute: DashboardRoute,
   LeaderboardRoute: LeaderboardRoute,
   PicksRoute: PicksRoute,
+  PlayRoute: PlayRoute,
   ProfileRoute: ProfileRoute,
+  CategorySlugRoute: CategorySlugRoute,
   PIdRoute: PIdRoute,
 }
 export const routeTree = rootRouteImport

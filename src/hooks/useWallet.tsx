@@ -20,7 +20,14 @@ type WalletContextValue = {
   providerState: "loading" | "ready" | "unavailable";
   connect: () => Promise<void>;
   signOut: () => Promise<void>;
-  sendStake: (params: { recipient: string; valueLuna: number; memo: string }) => Promise<string>;
+  /** Sign a prediction entry message. Returns { publicKey, signature } hex strings. */
+  signPrediction: (message: string) => Promise<{ publicKey: string; signature: string }>;
+  /** Send a basic NIM transaction with data (used for treasury funding, etc.). */
+  sendTransaction: (params: {
+    recipient: string;
+    valueLuna: number;
+    memo: string;
+  }) => Promise<string>;
 };
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -88,9 +95,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       providerState: nimiq.state,
       connect,
       signOut,
-      sendStake: nimiq.sendStake,
+      signPrediction: nimiq.signPrediction,
+      sendTransaction: nimiq.sendTransaction,
     }),
-    [address, signedIn, connecting, nimiq.state, nimiq.sendStake, connect, signOut],
+    [
+      address,
+      signedIn,
+      connecting,
+      nimiq.state,
+      nimiq.signPrediction,
+      nimiq.sendTransaction,
+      connect,
+      signOut,
+    ],
   );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;

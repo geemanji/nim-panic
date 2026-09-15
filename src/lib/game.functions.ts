@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 import { currentWeekPeriod } from "./period";
-import { nimToLuna, type FeedPrediction, type Outcome } from "./nim";
+import { type FeedPrediction, type Outcome } from "./nim";
 
 const PUBLIC_COLUMNS =
   "id, question, description, category, outcomes, lock_time, resolution_time, status, winning_outcome, is_demo, participants_count, total_staked_nim, outcome_totals, min_stake_nim, max_stake_nim";
@@ -55,6 +55,42 @@ export const getFeed = createServerFn({ method: "GET" }).handler(async () => {
   return (data ?? []).map((row) => normalize(row as Record<string, unknown>));
 });
 
+/** Fetch predictions filtered by category key (e.g. "CRYPTO"). */
+export const getFeedByCategory = createServerFn({ method: "GET" })
+  .validator((data: unknown) => z.object({ category: z.string().min(1).max(32) }).parse(data))
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { syncPredictionStates } = await import("./lifecycle.server");
+    await syncPredictionStates(supabaseAdmin);
+
+    const { data: rows, error } = await supabaseAdmin
+      .from("predictions")
+      .select(PUBLIC_COLUMNS)
+      .neq("status", "DRAFT")
+      .eq("category", data.category.toUpperCase())
+      .order("lock_time", { ascending: true })
+      .limit(50);
+    if (error) throw new Error("Could not load predictions");
+    return (rows ?? []).map((row) => normalize(row as Record<string, unknown>));
+  });
+
+/** Returns live (OPEN) prediction counts per category key. */
+export const getCategoryCounts = createServerFn({ method: "GET" }).handler(async () => {
+  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+  const { data } = await supabaseAdmin
+    .from("predictions")
+    .select("category")
+    .eq("status", "OPEN")
+    .gte("lock_time", new Date().toISOString());
+
+  const counts: Record<string, number> = {};
+  for (const row of data ?? []) {
+    const cat = String(row.category);
+    counts[cat] = (counts[cat] ?? 0) + 1;
+  }
+  return counts;
+});
+
 export const getPrediction = createServerFn({ method: "GET" })
   .validator((data: unknown) => z.object({ id: z.string().uuid() }).parse(data))
   .handler(async ({ data }) => {
@@ -72,17 +108,23 @@ export const getPrediction = createServerFn({ method: "GET" })
     return normalize(row as Record<string, unknown>);
   });
 
-export const getLeaderboard = createServerFn({ method: "GET" }).handler(async () => {
-  const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { data } = await supabaseAdmin
-    .from("leaderboard_stats")
-    .select("user_id, username, points, accuracy, wins, predictions, streak, nim_won")
-    .eq("period", currentWeekPeriod())
-    .order("points", { ascending: false })
-    .order("wins", { ascending: false })
-    .limit(50);
-  return { period: currentWeekPeriod(), rows: data ?? [] };
-});
+export const getLeaderboard = createServerFn({ method: "GET" })
+  .validator((data: unknown) =>
+    z.object({ period: z.enum(["weekly", "alltime"]).optional() }).parse(data ?? {}),
+  )
+  .handler(async ({ data }) => {
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const periodType = data?.period ?? "weekly";
+    const period = periodType === "alltime" ? "alltime" : currentWeekPeriod();
+    const { data: rows } = await supabaseAdmin
+      .from("leaderboard_stats")
+      .select("user_id, username, points, accuracy, wins, predictions, streak, nim_won")
+      .eq("period", period)
+      .order("points", { ascending: false })
+      .order("wins", { ascending: false })
+      .limit(50);
+    return { period, periodType, rows: rows ?? [] };
+  });
 
 export const getMyProfile = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -92,7 +134,7 @@ export const getMyProfile = createServerFn({ method: "GET" })
     const { data: profile } = await supabaseAdmin
       .from("profiles")
       .select(
-        "id, wallet_address, username, streak, best_streak, predictions_count, wins_count, nim_won, nim_staked, created_at",
+        "id, wallet_address, username, streak, best_streak, predictions_count, wins_count, nim_won, nim_staked, xp, panic_score, created_at",
       )
       .eq("id", context.userId)
       .maybeSingle();
@@ -160,7 +202,7 @@ export const getWalletBalance = createServerFn({ method: "POST" })
     }
   });
 
-/** Creates a PENDING_PAYMENT entry and returns the exact payment to make. */
+/** Creates a PENDING_PAYMENT entry and returns the message the wallet must sign. */
 export const createEntry = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((data: unknown) =>
@@ -174,11 +216,6 @@ export const createEntry = createServerFn({ method: "POST" })
   )
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { getNimiqConfig, memoForEntry } = await import("./nimiq-rpc.server");
-    const config = getNimiqConfig();
-    if (!config.treasuryAddress) {
-      throw new Error("Staking is not available yet: the game treasury is not configured.");
-    }
 
     const { data: prediction } = await supabaseAdmin
       .from("predictions")
@@ -243,35 +280,36 @@ export const createEntry = createServerFn({ method: "POST" })
       entryId = inserted.id;
     }
 
+    // Build a deterministic message the wallet signs to authorise this entry.
+    // Committing to entryId + memo + stakeNim prevents replay across entries.
+    const messageToSign = `NIM PANIC prediction\nEntry: ${entryId}\nOutcome: ${data.outcome}\nStake: ${data.stakeNim} NIM\nNonce: ${memo}`;
+
     return {
       entryId,
-      memo: memoForEntry(memo),
-      recipient: config.treasuryAddress,
-      valueLuna: nimToLuna(data.stakeNim),
+      messageToSign,
       stakeNim: data.stakeNim,
       outcome: data.outcome,
     };
   });
 
-/** Verifies the on-chain payment before an entry is ever reported as confirmed. */
+/** Verifies the wallet signature and confirms the prediction entry. */
 export const confirmEntry = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((data: unknown) =>
     z
-      .object({ entryId: z.string().uuid(), transactionHash: z.string().min(16).max(128) })
+      .object({
+        entryId: z.string().uuid(),
+        publicKey: z.string().regex(/^[0-9a-fA-F]{64}$/),
+        signature: z.string().regex(/^[0-9a-fA-F]{128}$/),
+      })
       .parse(data),
   )
   .handler(async ({ data, context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { getNimiqConfig, getTransaction, decodeTxData, RpcUnavailableError } = await import(
-      "./nimiq-rpc.server"
-    );
-    const { normalizeAddress } = await import("./nimiq-crypto.server");
-    const config = getNimiqConfig();
 
     const { data: entry } = await supabaseAdmin
       .from("prediction_entries")
-      .select("id, prediction_id, user_id, outcome, stake_nim, memo, status, transaction_hash")
+      .select("id, prediction_id, user_id, outcome, stake_nim, memo, status")
       .eq("id", data.entryId)
       .eq("user_id", context.userId)
       .maybeSingle();
@@ -280,80 +318,55 @@ export const confirmEntry = createServerFn({ method: "POST" })
       return { status: entry.status as string, verified: entry.status !== "PENDING_PAYMENT" };
     }
 
+    // Verify the public key matches the user's registered wallet address.
+    const { addressFromPublicKey, verifyNimiqSignature, normalizeAddress } =
+      await import("./nimiq-crypto.server");
     const { data: profile } = await supabaseAdmin
       .from("profiles")
       .select("wallet_address")
       .eq("id", context.userId)
       .maybeSingle();
 
-    const { data: clash } = await supabaseAdmin
-      .from("prediction_entries")
-      .select("id")
-      .eq("transaction_hash", data.transactionHash)
-      .maybeSingle();
-    if (clash && clash.id !== entry.id) throw new Error("That payment is already used.");
-
-    if (!config.rpcUrl) {
-      return {
-        status: "PENDING_PAYMENT",
-        verified: false,
-        reason:
-          "Payment sent, but this app cannot verify it yet: no Nimiq node is configured for verification.",
-      };
-    }
-
-    let tx;
-    try {
-      tx = await getTransaction(data.transactionHash);
-    } catch (error) {
-      if (error instanceof RpcUnavailableError) {
-        return { status: "PENDING_PAYMENT", verified: false, reason: error.message };
+    if (profile) {
+      const derivedAddress = normalizeAddress(addressFromPublicKey(data.publicKey));
+      const profileAddress = normalizeAddress(profile.wallet_address);
+      if (derivedAddress !== profileAddress) {
+        throw new Error("Signature public key does not match your registered wallet.");
       }
-      throw error;
-    }
-    if (!tx) {
-      return {
-        status: "PENDING_PAYMENT",
-        verified: false,
-        reason: "Payment not visible on the network yet. We will keep checking.",
-      };
     }
 
-    const expectedLuna = nimToLuna(Number(entry.stake_nim));
-    const memo = decodeTxData(tx.data);
-    const problems: string[] = [];
-    if (normalizeAddress(tx.to) !== normalizeAddress(config.treasuryAddress ?? "")) {
-      problems.push("paid to the wrong address");
-    }
-    if (tx.value < expectedLuna) problems.push("amount is lower than the stake");
-    if (!memo.includes(entry.memo)) problems.push("payment reference does not match");
-    if (profile && normalizeAddress(tx.from) !== normalizeAddress(profile.wallet_address)) {
-      problems.push("payment came from a different wallet");
-    }
-    if (problems.length > 0) {
-      return {
-        status: "PENDING_PAYMENT",
-        verified: false,
-        reason: `Payment could not be matched: ${problems.join(", ")}.`,
-      };
-    }
+    // Reconstruct the exact message that was signed.
+    const messageToSign = `NIM PANIC prediction\nEntry: ${entry.id}\nOutcome: ${entry.outcome}\nStake: ${entry.stake_nim} NIM\nNonce: ${entry.memo}`;
+
+    const valid = await verifyNimiqSignature({
+      message: messageToSign,
+      publicKey: data.publicKey,
+      signature: data.signature,
+    });
+    if (!valid) throw new Error("Signature is invalid. Please try again.");
 
     const { data: prediction } = await supabaseAdmin
       .from("predictions")
-      .select("participants_count, total_staked_nim, outcome_totals, status")
+      .select("participants_count, total_staked_nim, outcome_totals, status, lock_time")
       .eq("id", entry.prediction_id)
       .maybeSingle();
+
+    // Final lock-time guard — race condition protection.
+    if (prediction && new Date(prediction.lock_time).getTime() <= Date.now()) {
+      throw new Error("Too late — this prediction locked while you were signing.");
+    }
 
     const { error: updateError } = await supabaseAdmin
       .from("prediction_entries")
       .update({
-        transaction_hash: data.transactionHash,
+        // Re-use transaction_hash column to store the signature for audit.
+        transaction_hash: data.signature,
         status: "CONFIRMED",
         confirmed_at: new Date().toISOString(),
       })
       .eq("id", entry.id)
       .eq("status", "PENDING_PAYMENT");
-    if (updateError) throw new Error("Could not record your confirmed payment.");
+    if (updateError) throw new Error("Could not record your confirmed prediction.");
 
     if (prediction) {
       const totals = { ...((prediction.outcome_totals as Record<string, number>) ?? {}) };
@@ -368,5 +381,10 @@ export const confirmEntry = createServerFn({ method: "POST" })
         .eq("id", entry.prediction_id);
     }
 
-    return { status: "CONFIRMED", verified: true, transactionHash: data.transactionHash };
+    // Refresh the player's profile stats (nim_staked, predictions_count, etc.)
+    // so they are current immediately after confirming, without waiting for settlement.
+    const { refreshPlayerStats } = await import("./settlement.server");
+    await refreshPlayerStats(supabaseAdmin, context.userId);
+
+    return { status: "CONFIRMED", verified: true };
   });

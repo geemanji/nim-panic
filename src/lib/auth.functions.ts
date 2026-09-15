@@ -10,7 +10,7 @@ const completeSchema = z.object({
 
 /** Step 1 of wallet auth: the backend issues a single-use challenge. */
 export const startWalletAuth = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => startSchema.parse(data))
+  .validator((data: unknown) => startSchema.parse(data))
   .handler(async ({ data }) => {
     const { normalizeAddress, isValidNimiqAddress } = await import("./nimiq-crypto.server");
     const address = normalizeAddress(data.address);
@@ -33,7 +33,7 @@ export const startWalletAuth = createServerFn({ method: "POST" })
 
 /** Step 2: verify the signature server-side, then issue a session. */
 export const completeWalletAuth = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => completeSchema.parse(data))
+  .validator((data: unknown) => completeSchema.parse(data))
   .handler(async ({ data }) => {
     const { normalizeAddress, addressFromPublicKey, verifyNimiqSignature } = await import(
       "./nimiq-crypto.server"

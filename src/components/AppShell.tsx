@@ -1,5 +1,6 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { Flame, Home, ListChecks, Play, Trophy, User } from "lucide-react";
+import { Home, ListChecks, Play, Trophy, User } from "lucide-react";
+import { NimPanicIcon } from "./NimPanicIcon";
 import type { ReactNode } from "react";
 import { shortenAddress } from "@/lib/nim";
 import { useWallet } from "@/hooks/useWallet";
@@ -35,8 +36,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="flex items-center justify-between gap-3">
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2">
-            <span className="flex size-8 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-              <Flame className="size-4" />
+            <span
+              className="flex size-8 items-center justify-center rounded-[9px] shadow-[0_0_12px_-2px_var(--color-primary)]"
+              style={{ background: "#0F1B3E" }}
+            >
+              <NimPanicIcon size={24} />
             </span>
             <span className="font-display text-lg font-bold leading-none tracking-tight">
               NIM <span className="text-primary">PANIC</span>

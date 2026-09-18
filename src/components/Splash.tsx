@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Flame } from "lucide-react";
+import { NimPanicIcon } from "./NimPanicIcon";
 
 const MIN_DISPLAY_MS = 1200;
 const FADE_MS = 500;
@@ -28,11 +28,15 @@ export function Splash({ onDone }: { onDone: () => void }) {
         leaving ? "pointer-events-none opacity-0" : "opacity-100"
       }`}
     >
-      <div className="relative flex size-20 items-center justify-center">
-        <span className="absolute inset-0 animate-[pulse-ring_1.6s_ease-out_infinite] rounded-3xl bg-primary/25" />
-        <span className="absolute inset-0 animate-[pulse-ring_1.6s_ease-out_infinite_0.4s] rounded-3xl bg-primary/15" />
-        <span className="relative flex size-16 items-center justify-center rounded-3xl bg-primary text-primary-foreground shadow-[0_0_40px_-8px_var(--color-primary)]">
-          <Flame className="size-8" />
+      <div className="relative flex size-24 items-center justify-center">
+        <span className="absolute inset-0 animate-[pulse-ring_1.6s_ease-out_infinite] rounded-[28px] bg-primary/25" />
+        <span className="absolute inset-0 animate-[pulse-ring_1.6s_ease-out_infinite_0.4s] rounded-[28px] bg-primary/15" />
+        {/* Navy rounded-square background matching the favicon shape */}
+        <span
+          className="relative flex size-20 items-center justify-center rounded-[22px] shadow-[0_0_48px_-8px_var(--color-primary)]"
+          style={{ background: "#0F1B3E" }}
+        >
+          <NimPanicIcon size={56} />
         </span>
       </div>
 

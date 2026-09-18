@@ -130,7 +130,6 @@ export const getMyProfile = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { getAdminAddresses } = await import("./nimiq-rpc.server");
     const { data: profile } = await supabaseAdmin
       .from("profiles")
       .select(
@@ -155,7 +154,7 @@ export const getMyProfile = createServerFn({ method: "GET" })
     return {
       ...profile,
       accuracy,
-      isAdmin: Boolean(role) || getAdminAddresses().includes(profile.wallet_address),
+      isAdmin: Boolean(role),
     };
   });
 

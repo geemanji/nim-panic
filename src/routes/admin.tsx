@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CheckCircle2, CircleDollarSign, History, Landmark, Send } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/AppShell";
@@ -8,10 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { useWallet } from "@/hooks/useWallet";
 import {
-  adminAccess,
-  adminClaim,
+  adminSignIn,
   adminCreatePrediction,
   adminListPredictions,
   adminLockPrediction,
@@ -22,7 +20,9 @@ import {
   adminSettlePrediction,
   adminTreasuryInfo,
 } from "@/lib/admin.functions";
-import { formatNim, nimToLuna, shortenAddress } from "@/lib/nim";
+import { formatNim } from "@/lib/nim";
+
+const SESSION_KEY = "nim-panic-admin-token";
 
 export const Route = createFileRoute("/admin")({
   head: () => ({
@@ -94,49 +94,139 @@ const TEMPLATES: {
 ];
 
 function AdminPage() {
-  const wallet = useWallet();
   const queryClient = useQueryClient();
 
-  const access = useQuery({
-    queryKey: ["admin-access"],
-    queryFn: () => adminAccess(),
-    enabled: wallet.signedIn,
-    retry: false,
+  // Admin session is stored in sessionStorage so it survives a page reload
+  // but is scoped to this tab — no cross-tab token sharing.
+  const [token, setToken] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return sessionStorage.getItem(SESSION_KEY);
   });
+
+  // Keep sessionStorage in sync whenever token changes.
+  useEffect(() => {
+    if (token) sessionStorage.setItem(SESSION_KEY, token);
+    else sessionStorage.removeItem(SESSION_KEY);
+  }, [token]);
+
+  const signOut = () => {
+    setToken(null);
+    queryClient.clear();
+  };
+
+  // Inject the admin token as a Bearer header on every admin server fn call.
+  // TanStack Start server functions read the Authorization header via the
+  // requireSupabaseAuth middleware.
+  useEffect(() => {
+    if (!token) return;
+    // Patch the global fetch to inject the header for same-origin API calls.
+    // This is the simplest approach given server functions use the page origin.
+    const original = window.fetch;
+    window.fetch = (input, init) => {
+      const headers = new Headers(init?.headers);
+      if (!headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+      return original(input, { ...init, headers });
+    };
+    return () => {
+      window.fetch = original;
+    };
+  }, [token]);
+
+  if (!token) {
+    return (
+      <AppShell>
+        <AdminLoginForm onSuccess={setToken} />
+      </AppShell>
+    );
+  }
+
+  return <AdminConsole onSignOut={signOut} />;
+}
+
+// ── Login form ────────────────────────────────────────────────────────────────
+
+function AdminLoginForm({ onSuccess }: { onSuccess: (token: string) => void }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const signIn = useMutation({
+    mutationFn: () => adminSignIn({ data: { email, password } }),
+    onSuccess: (result) => {
+      onSuccess(result.accessToken);
+      toast.success("Signed in");
+    },
+    onError: (error) => toast.error(error instanceof Error ? error.message : "Sign-in failed"),
+  });
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    signIn.mutate();
+  };
+
+  return (
+    <div className="mx-auto mt-16 max-w-xs">
+      <h1 className="font-display text-xl font-bold">Admin console</h1>
+      <p className="mt-1 text-sm text-muted-foreground">Sign in with your admin credentials.</p>
+
+      <form onSubmit={submit} className="mt-6 space-y-4">
+        <label className="block">
+          <span className="mb-1 block text-[11px] uppercase tracking-wide text-muted-foreground">
+            Email
+          </span>
+          <Input
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-[11px] uppercase tracking-wide text-muted-foreground">
+            Password
+          </span>
+          <Input
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+        </label>
+        <Button type="submit" className="w-full" disabled={signIn.isPending}>
+          {signIn.isPending ? "Signing in…" : "Sign in"}
+        </Button>
+      </form>
+    </div>
+  );
+}
+
+// ── Authenticated console ─────────────────────────────────────────────────────
+
+function AdminConsole({ onSignOut }: { onSignOut: () => void }) {
+  const queryClient = useQueryClient();
 
   const list = useQuery({
     queryKey: ["admin-predictions"],
     queryFn: () => adminListPredictions(),
-    enabled: Boolean(access.data?.isAdmin),
     retry: false,
   });
 
   const treasury = useQuery({
     queryKey: ["admin-treasury"],
     queryFn: () => adminTreasuryInfo(),
-    enabled: Boolean(access.data?.isAdmin),
     retry: false,
   });
 
   const history = useQuery({
     queryKey: ["admin-payout-history"],
     queryFn: () => adminPayoutHistory(),
-    enabled: Boolean(access.data?.isAdmin),
     retry: false,
   });
 
   const [preset, setPreset] = useState<(typeof TEMPLATES)[number] | null>(null);
 
   const refresh = () => queryClient.invalidateQueries();
-
-  const claim = useMutation({
-    mutationFn: () => adminClaim(),
-    onSuccess: () => {
-      toast.success("Admin access granted to this wallet");
-      refresh();
-    },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Could not claim"),
-  });
 
   const retry = useMutation({
     mutationFn: () => adminRetryPayouts(),
@@ -147,79 +237,19 @@ function AdminPage() {
     onError: (error) => toast.error(error instanceof Error ? error.message : "Retry failed"),
   });
 
-  const [fundAmount, setFundAmount] = useState("100");
-  const fund = useMutation({
-    mutationFn: async () => {
-      const amount = Number(fundAmount);
-      if (!treasury.data?.address) throw new Error("Configure the treasury address first.");
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Enter a valid NIM amount.");
-      return wallet.sendTransaction({
-        recipient: treasury.data.address,
-        valueLuna: nimToLuna(amount),
-        memo: "NIM PANIC TREASURY",
-      });
-    },
-    onSuccess: () => {
-      toast.success("Treasury funding sent");
-      setTimeout(refresh, 2500);
-      queryClient.invalidateQueries({ queryKey: ["wallet-balance"] });
-    },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Funding failed"),
-  });
-
-  if (!wallet.signedIn) {
-    return (
-      <AppShell>
-        <Locked
-          body="Connect an admin wallet to manage markets."
-          action={
-            <Button onClick={wallet.connect} disabled={wallet.connecting}>
-              {wallet.connecting ? "Connecting…" : "Connect wallet"}
-            </Button>
-          }
-        />
-      </AppShell>
-    );
-  }
-
-  if (access.isLoading) {
-    return (
-      <AppShell>
-        <p className="mt-8 text-center text-sm text-muted-foreground">Checking access…</p>
-      </AppShell>
-    );
-  }
-
-  if (!access.data?.isAdmin) {
-    return (
-      <AppShell>
-        <Locked
-          body={
-            access.data?.canBootstrap
-              ? "No operator has claimed this console yet. Claim it with this wallet to run the game."
-              : "This wallet is not an admin. Add it to the admin allowlist to unlock this console."
-          }
-          action={
-            access.data?.canBootstrap ? (
-              <Button onClick={() => claim.mutate()} disabled={claim.isPending}>
-                {claim.isPending ? "Claiming…" : "Claim admin access"}
-              </Button>
-            ) : undefined
-          }
-        />
-      </AppShell>
-    );
-  }
-
   return (
     <AppShell>
-      <h1 className="font-display text-xl font-bold">Admin console</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        Create markets, open them live, resolve outcomes and settle payouts.
-        {access.data.wallet ? ` Signed in as ${shortenAddress(access.data.wallet)}.` : ""}
-      </p>
-
-      <Tabs defaultValue="markets" className="mt-5">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h1 className="font-display text-xl font-bold">Admin console</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Create markets, resolve outcomes and settle payouts.
+          </p>
+        </div>
+        <Button size="sm" variant="secondary" onClick={onSignOut}>
+          Sign out
+        </Button>
+      </div>
         <TabsList className="grid h-11 w-full grid-cols-3">
           <TabsTrigger value="markets">Markets</TabsTrigger>
           <TabsTrigger value="treasury">Treasury</TabsTrigger>
@@ -270,10 +300,6 @@ function AdminPage() {
           <TreasuryPanel
             data={treasury.data}
             loading={treasury.isLoading}
-            amount={fundAmount}
-            onAmount={setFundAmount}
-            onFund={() => fund.mutate()}
-            funding={fund.isPending}
             onPay={() => retry.mutate()}
             paying={retry.isPending}
           />
@@ -292,19 +318,11 @@ type TreasuryData = Awaited<ReturnType<typeof adminTreasuryInfo>>;
 function TreasuryPanel({
   data,
   loading,
-  amount,
-  onAmount,
-  onFund,
-  funding,
   onPay,
   paying,
 }: {
   data: TreasuryData | undefined;
   loading: boolean;
-  amount: string;
-  onAmount: (value: string) => void;
-  onFund: () => void;
-  funding: boolean;
   onPay: () => void;
   paying: boolean;
 }) {
@@ -356,25 +374,6 @@ function TreasuryPanel({
           <Send className="size-4" />
           {paying ? "Paying winners…" : "Pay pending winners"}
         </Button>
-      </section>
-
-      <section className="rounded-2xl border border-border bg-card p-4">
-        <h2 className="font-display text-sm font-bold">Fund treasury</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Send NIM from your connected wallet into the market treasury.
-        </p>
-        <div className="mt-3 flex gap-2">
-          <Input
-            value={amount}
-            onChange={(event) => onAmount(event.target.value)}
-            inputMode="decimal"
-            aria-label="Funding amount in NIM"
-            placeholder="100"
-          />
-          <Button onClick={onFund} disabled={funding || !data.configured}>
-            {funding ? "Sending…" : "Fund"}
-          </Button>
-        </div>
       </section>
     </div>
   );
@@ -733,15 +732,5 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       </span>
       {children}
     </label>
-  );
-}
-
-function Locked({ body, action }: { body: string; action?: React.ReactNode }) {
-  return (
-    <div className="mt-8 rounded-2xl border border-border bg-card p-6 text-center">
-      <h1 className="font-display text-base font-bold">Admin only</h1>
-      <p className="mt-2 text-sm text-muted-foreground">{body}</p>
-      {action && <div className="mt-4 flex justify-center">{action}</div>}
-    </div>
   );
 }

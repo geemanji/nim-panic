@@ -2,17 +2,14 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { z } from "zod";
 
-const outcomeSchema = z.object({ key: z.string().min(1).max(24), label: z.string().min(1).max(48) });
+const outcomeSchema = z.object({
+  key: z.string().min(1).max(24),
+  label: z.string().min(1).max(48),
+});
 
 async function assertAdmin(userId: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  const { getAdminAddresses } = await import("./nimiq-rpc.server");
 
-  const { data: profile } = await supabaseAdmin
-    .from("profiles")
-    .select("wallet_address")
-    .eq("id", userId)
-    .maybeSingle();
   const { data: role } = await supabaseAdmin
     .from("user_roles")
     .select("role")
@@ -20,10 +17,46 @@ async function assertAdmin(userId: string) {
     .eq("role", "admin")
     .maybeSingle();
 
-  const allowlisted = profile ? getAdminAddresses().includes(profile.wallet_address) : false;
-  if (!role && !allowlisted) throw new Error("Admins only.");
+  if (!role) throw new Error("Admins only.");
   return supabaseAdmin;
 }
+
+/**
+ * Sign in with the admin email + password.
+ * Returns a Supabase access/refresh token pair — the client stores these
+ * exactly like the wallet auth tokens and sends them as Bearer on every
+ * subsequent admin server function call.
+ *
+ * Rate-limiting and brute-force protection are handled by Supabase Auth.
+ */
+export const adminSignIn = createServerFn({ method: "POST" })
+  .validator((data: unknown) =>
+    z.object({ email: z.string().email(), password: z.string().min(1) }).parse(data),
+  )
+  .handler(async ({ data }) => {
+    const { createPublishableClient } = await import("./supabase-public.server");
+    const client = createPublishableClient();
+    const { data: session, error } = await client.auth.signInWithPassword({
+      email: data.email,
+      password: data.password,
+    });
+    if (error || !session.session) throw new Error("Invalid credentials.");
+
+    // Confirm the signing user actually has the admin role.
+    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
+    const { data: role } = await supabaseAdmin
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", session.user.id)
+      .eq("role", "admin")
+      .maybeSingle();
+    if (!role) throw new Error("This account does not have admin access.");
+
+    return {
+      accessToken: session.session.access_token,
+      refreshToken: session.session.refresh_token,
+    };
+  });
 
 export const adminListPredictions = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -386,60 +419,6 @@ export const adminPayoutHistory = createServerFn({ method: "GET" })
     }
 
     return [...markets.values()];
-  });
-
-/** Tells the console whether this wallet is an admin, and whether bootstrap is still open. */
-export const adminAccess = createServerFn({ method: "GET" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { getAdminAddresses } = await import("./nimiq-rpc.server");
-
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("wallet_address")
-      .eq("id", context.userId)
-      .maybeSingle();
-    const { data: role } = await supabaseAdmin
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", context.userId)
-      .eq("role", "admin")
-      .maybeSingle();
-    const { count } = await supabaseAdmin
-      .from("user_roles")
-      .select("user_id", { count: "exact", head: true })
-      .eq("role", "admin");
-
-    const allowlist = getAdminAddresses();
-    const allowlisted = profile ? allowlist.includes(profile.wallet_address) : false;
-
-    return {
-      isAdmin: Boolean(role) || allowlisted,
-      canBootstrap: (count ?? 0) === 0 && allowlist.length === 0,
-      wallet: profile?.wallet_address ?? null,
-    };
-  });
-
-/** First operator claims the console while no admin exists and no allowlist is set. */
-export const adminClaim = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { getAdminAddresses } = await import("./nimiq-rpc.server");
-    if (getAdminAddresses().length > 0) throw new Error("Admin allowlist is configured.");
-
-    const { count } = await supabaseAdmin
-      .from("user_roles")
-      .select("user_id", { count: "exact", head: true })
-      .eq("role", "admin");
-    if ((count ?? 0) > 0) throw new Error("An admin already exists.");
-
-    const { error } = await supabaseAdmin
-      .from("user_roles")
-      .insert({ user_id: context.userId, role: "admin" });
-    if (error) throw new Error("Could not claim admin access.");
-    return { ok: true };
   });
 
 /** Closes entries immediately so the market can be resolved. */

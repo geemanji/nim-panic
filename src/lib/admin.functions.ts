@@ -143,14 +143,19 @@ export const adminResolvePrediction = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-/** Computes payouts, writes settlements, pays winners via the settlement driver. */
+/**
+ * Computes payouts and writes settlement rows, then queues winners for
+ * wallet-driven payment. The admin client calls adminGetPendingPayouts to
+ * retrieve the queue, sends each transaction via their connected MiniPay
+ * wallet, and records the hashes with adminRecordPayouts.
+ */
 export const adminSettlePrediction = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((data: unknown) => z.object({ predictionId: z.string().uuid() }).parse(data))
   .handler(async ({ data, context }) => {
     const supabaseAdmin = await assertAdmin(context.userId);
     const { payoutMultiplier } = await import("./nim");
-    const { payout, refreshPlayerStats, settlementDriver } = await import("./settlement.server");
+    const { refreshPlayerStats } = await import("./settlement.server");
 
     const { data: prediction } = await supabaseAdmin
       .from("predictions")
@@ -175,13 +180,13 @@ export const adminSettlePrediction = createServerFn({ method: "POST" })
     );
 
     const touchedUsers = new Set<string>();
-    let paid = 0;
-    let pending = 0;
+    let queued = 0;
 
     for (const entry of entries ?? []) {
       touchedUsers.add(entry.user_id);
       const won = entry.outcome === winning;
 
+      // Skip if already settled (idempotent).
       const { data: alreadySettled } = await supabaseAdmin
         .from("settlements")
         .select("id")
@@ -205,31 +210,15 @@ export const adminSettlePrediction = createServerFn({ method: "POST" })
       }
 
       const amountNim = Math.round(Number(entry.stake_nim) * multiplier * 1e5) / 1e5;
-      const { data: winnerProfile } = await supabaseAdmin
-        .from("profiles")
-        .select("wallet_address")
-        .eq("id", entry.user_id)
-        .maybeSingle();
 
-      const result = winnerProfile
-        ? await payout({
-            recipient: winnerProfile.wallet_address,
-            amountNim,
-            reference: entry.id.slice(0, 8),
-          })
-        : ({ status: "FAILED", reason: "No wallet on file" } as const);
-
+      // Queue for wallet-driven payout — the admin client sends the transactions.
       await supabaseAdmin.from("settlements").insert({
         prediction_entry_id: entry.id,
         payout_nim: amountNim,
-        status: result.status,
-        transaction_hash: result.status === "SENT" ? result.transactionHash : null,
-        error_message: result.status === "SENT" ? null : result.reason,
-        paid_at: result.status === "SENT" ? new Date().toISOString() : null,
+        status: "PENDING_PAYOUT",
+        error_message: null,
       });
-
-      if (result.status === "SENT") paid += 1;
-      else pending += 1;
+      queued += 1;
     }
 
     await supabaseAdmin
@@ -239,7 +228,7 @@ export const adminSettlePrediction = createServerFn({ method: "POST" })
 
     for (const userId of touchedUsers) await refreshPlayerStats(supabaseAdmin, userId);
 
-    return { paid, pending, multiplier, driver: settlementDriver() };
+    return { queued, multiplier };
   });
 
 /** Retries payouts that are still pending (e.g. after payouts get configured). */
@@ -471,4 +460,132 @@ export const adminOpenMarket = createServerFn({ method: "POST" })
       .neq("status", "SETTLED");
     if (error) throw new Error("Could not open the market.");
     return { ok: true };
+  });
+
+/**
+ * Returns all pending/failed settlement rows with enough detail for the
+ * admin wallet to construct and send the NIM transactions client-side.
+ * Each item includes the settlement id, recipient address, amount in Luna,
+ * and a short memo to embed in the transaction data field.
+ */
+export const adminGetPendingPayouts = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const supabaseAdmin = await assertAdmin(context.userId);
+    const { nimToLuna } = await import("./nim");
+
+    const { data: rows } = await supabaseAdmin
+      .from("settlements")
+      .select(
+        "id, payout_nim, prediction_entry_id, prediction_entries!inner(user_id, predictions!inner(question))",
+      )
+      .in("status", ["PENDING_PAYOUT", "FAILED"])
+      .order("created_at", { ascending: true })
+      .limit(50);
+
+    if (!rows || rows.length === 0) return [];
+
+    const userIds = [
+      ...new Set(
+        rows.map((row) =>
+          String((row.prediction_entries as unknown as { user_id: string }).user_id),
+        ),
+      ),
+    ];
+    const { data: profiles } = await supabaseAdmin
+      .from("profiles")
+      .select("id, wallet_address, username")
+      .in("id", userIds);
+    const playerMap = new Map((profiles ?? []).map((p) => [p.id, p]));
+
+    return rows.map((row) => {
+      const entry = row.prediction_entries as unknown as {
+        user_id: string;
+        predictions: { question: string };
+      };
+      const profile = playerMap.get(entry.user_id);
+      const amountNim = Number(row.payout_nim);
+      return {
+        settlementId: row.id,
+        recipient: profile?.wallet_address ?? null,
+        username: profile?.username ?? "Unknown",
+        amountNim,
+        valueLuna: nimToLuna(amountNim),
+        memo: `NP-WIN:${row.prediction_entry_id.slice(0, 8)}`,
+        question: entry.predictions.question,
+      };
+    });
+  });
+
+/**
+ * Records transaction hashes for wallet-driven payouts.
+ * Called by the admin client after it has sent the transactions via MiniPay.
+ * Each item: { settlementId, transactionHash } — or { settlementId, error } on failure.
+ */
+export const adminRecordPayouts = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((data: unknown) =>
+    z
+      .object({
+        results: z.array(
+          z.union([
+            z.object({
+              settlementId: z.string().uuid(),
+              transactionHash: z.string().min(1),
+            }),
+            z.object({
+              settlementId: z.string().uuid(),
+              error: z.string(),
+            }),
+          ]),
+        ),
+      })
+      .parse(data),
+  )
+  .handler(async ({ data, context }) => {
+    const supabaseAdmin = await assertAdmin(context.userId);
+    const { refreshPlayerStats } = await import("./settlement.server");
+
+    let sent = 0;
+    let failed = 0;
+
+    for (const result of data.results) {
+      if ("transactionHash" in result) {
+        await supabaseAdmin
+          .from("settlements")
+          .update({
+            status: "SENT",
+            transaction_hash: result.transactionHash,
+            error_message: null,
+            paid_at: new Date().toISOString(),
+          })
+          .eq("id", result.settlementId)
+          .in("status", ["PENDING_PAYOUT", "FAILED"]);
+        sent += 1;
+      } else {
+        await supabaseAdmin
+          .from("settlements")
+          .update({
+            status: "FAILED",
+            error_message: result.error,
+          })
+          .eq("id", result.settlementId);
+        failed += 1;
+      }
+    }
+
+    // Refresh stats for everyone whose settlement changed.
+    const settlementIds = data.results.map((r) => r.settlementId);
+    const { data: entries } = await supabaseAdmin
+      .from("settlements")
+      .select("prediction_entries!inner(user_id)")
+      .in("id", settlementIds);
+    const touchedUsers = new Set(
+      (entries ?? []).map((row) =>
+        String((row.prediction_entries as unknown as { user_id: string }).user_id),
+      ),
+    );
+    for (const userId of touchedUsers) await refreshPlayerStats(supabaseAdmin, userId);
+
+    return { sent, failed };
   });

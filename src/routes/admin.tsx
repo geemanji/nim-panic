@@ -16,11 +16,13 @@ import {
   adminOpenMarket,
   adminPayoutHistory,
   adminResolvePrediction,
-  adminRetryPayouts,
   adminSettlePrediction,
   adminTreasuryInfo,
+  adminGetPendingPayouts,
+  adminRecordPayouts,
 } from "@/lib/admin.functions";
-import { formatNim } from "@/lib/nim";
+import { useWallet } from "@/hooks/useWallet";
+import { formatNim, nimToLuna } from "@/lib/nim";
 
 const SESSION_KEY = "nim-panic-admin-token";
 
@@ -218,6 +220,12 @@ function AdminConsole({ onSignOut }: { onSignOut: () => void }) {
     retry: false,
   });
 
+  const pendingPayouts = useQuery({
+    queryKey: ["admin-pending-payouts"],
+    queryFn: () => adminGetPendingPayouts(),
+    retry: false,
+  });
+
   const history = useQuery({
     queryKey: ["admin-payout-history"],
     queryFn: () => adminPayoutHistory(),
@@ -227,15 +235,6 @@ function AdminConsole({ onSignOut }: { onSignOut: () => void }) {
   const [preset, setPreset] = useState<(typeof TEMPLATES)[number] | null>(null);
 
   const refresh = () => queryClient.invalidateQueries();
-
-  const retry = useMutation({
-    mutationFn: () => adminRetryPayouts(),
-    onSuccess: (result) => {
-      toast.success(`Retried payouts — ${result.sent} sent`);
-      refresh();
-    },
-    onError: (error) => toast.error(error instanceof Error ? error.message : "Retry failed"),
-  });
 
   return (
     <AppShell>
@@ -300,8 +299,9 @@ function AdminConsole({ onSignOut }: { onSignOut: () => void }) {
           <TreasuryPanel
             data={treasury.data}
             loading={treasury.isLoading}
-            onPay={() => retry.mutate()}
-            paying={retry.isPending}
+            pendingPayouts={pendingPayouts.data ?? []}
+            pendingLoading={pendingPayouts.isLoading}
+            onRefresh={refresh}
           />
         </TabsContent>
 
@@ -314,21 +314,70 @@ function AdminConsole({ onSignOut }: { onSignOut: () => void }) {
 }
 
 type TreasuryData = Awaited<ReturnType<typeof adminTreasuryInfo>>;
+type PendingPayout = Awaited<ReturnType<typeof adminGetPendingPayouts>>[number];
 
 function TreasuryPanel({
   data,
   loading,
-  onPay,
-  paying,
+  pendingPayouts,
+  pendingLoading,
+  onRefresh,
 }: {
   data: TreasuryData | undefined;
   loading: boolean;
-  onPay: () => void;
-  paying: boolean;
+  pendingPayouts: PendingPayout[];
+  pendingLoading: boolean;
+  onRefresh: () => void;
 }) {
+  const wallet = useWallet();
+  const [paying, setPaying] = useState(false);
+
   if (loading) return <p className="text-sm text-muted-foreground">Loading treasury…</p>;
   if (!data)
     return <p className="text-sm text-destructive">Treasury information is unavailable.</p>;
+
+  const totalPendingNim = pendingPayouts.reduce((sum, p) => sum + p.amountNim, 0);
+
+  const payWinners = async () => {
+    if (!wallet.signedIn) {
+      toast.error("Connect your treasury wallet first.");
+      return;
+    }
+    if (pendingPayouts.length === 0) return;
+    setPaying(true);
+
+    const results: { settlementId: string; transactionHash?: string; error?: string }[] = [];
+
+    for (const item of pendingPayouts) {
+      if (!item.recipient) {
+        results.push({ settlementId: item.settlementId, error: "No wallet address on file" });
+        continue;
+      }
+      try {
+        const txHash = await wallet.sendTransaction({
+          recipient: item.recipient,
+          valueLuna: item.valueLuna,
+          memo: item.memo,
+        });
+        results.push({ settlementId: item.settlementId, transactionHash: txHash });
+        toast.success(`Paid ${item.username} — ${formatNim(item.amountNim)} NIM`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Transaction failed";
+        results.push({ settlementId: item.settlementId, error: message });
+        toast.error(`Failed to pay ${item.username}: ${message}`);
+      }
+    }
+
+    try {
+      const summary = await adminRecordPayouts({ data: { results } });
+      toast.success(`Done — ${summary.sent} sent, ${summary.failed} failed`);
+    } catch {
+      toast.error("Could not record payment results — check the payout history.");
+    }
+
+    setPaying(false);
+    onRefresh();
+  };
 
   return (
     <div className="space-y-4">
@@ -341,12 +390,9 @@ function TreasuryPanel({
             {data.network}net
           </span>
         </div>
-        <p className="mt-5 text-xs uppercase text-muted-foreground">Available balance</p>
-        <p className="mt-1 font-display text-3xl font-bold tabular">
-          {data.balanceNim == null ? "—" : formatNim(data.balanceNim, 5)} NIM
-        </p>
-        <p className="mt-2 break-all text-xs text-muted-foreground">
-          {data.address ?? "Treasury address not configured"}
+        <p className="mt-5 text-xs uppercase text-muted-foreground">Treasury address</p>
+        <p className="mt-1 break-all font-mono text-xs">
+          {data.address ?? "Not configured in environment"}
         </p>
         {data.balanceError && <p className="mt-2 text-xs text-warning">{data.balanceError}</p>}
       </section>
@@ -354,26 +400,76 @@ function TreasuryPanel({
       <section className="rounded-2xl border border-border bg-card p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="font-display text-sm font-bold">Pending winner payouts</h2>
+            <h2 className="font-display text-sm font-bold">Pay winners from your wallet</h2>
             <p className="mt-1 text-xs text-muted-foreground">
-              {data.pendingCount} payments · {formatNim(data.pendingNim, 5)} NIM queued
+              Connect your treasury wallet via MiniPay, then send all pending payouts in one go.
             </p>
           </div>
-          <CircleDollarSign className="size-5 text-primary" />
+          <CircleDollarSign className="size-5 shrink-0 text-primary" />
         </div>
-        {!data.payoutsEnabled && (
-          <p className="mt-3 rounded-lg bg-surface p-3 text-xs text-warning">
-            Automatic payouts need the treasury wallet passphrase in secure configuration.
-          </p>
+
+        {!wallet.signedIn ? (
+          <div className="mt-4">
+            <p className="mb-3 text-xs text-muted-foreground">
+              Open this page inside Nimiq Pay to connect your treasury wallet.
+            </p>
+            <Button
+              className="w-full"
+              onClick={() => wallet.connect()}
+              disabled={wallet.connecting || wallet.providerState === "unavailable"}
+            >
+              {wallet.connecting
+                ? "Connecting…"
+                : wallet.providerState === "unavailable"
+                  ? "Open in Nimiq Pay to connect"
+                  : "Connect wallet"}
+            </Button>
+          </div>
+        ) : (
+          <div className="mt-4 space-y-3">
+            <p className="text-xs text-muted-foreground">
+              Connected: <span className="font-mono">{wallet.address?.slice(0, 14)}…</span>
+            </p>
+
+            {pendingLoading ? (
+              <p className="text-xs text-muted-foreground">Loading pending payouts…</p>
+            ) : pendingPayouts.length === 0 ? (
+              <p className="rounded-xl bg-surface p-3 text-xs text-muted-foreground">
+                No pending payouts — all winners have been paid.
+              </p>
+            ) : (
+              <>
+                <div className="rounded-xl bg-surface p-3">
+                  <p className="text-xs font-semibold">
+                    {pendingPayouts.length} payment{pendingPayouts.length === 1 ? "" : "s"} ready
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Total: {formatNim(totalPendingNim, 5)} NIM
+                  </p>
+                  <div className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+                    {pendingPayouts.map((p) => (
+                      <div key={p.settlementId} className="flex justify-between text-[11px]">
+                        <span className="truncate text-muted-foreground">{p.username}</span>
+                        <span className="ml-2 shrink-0 font-semibold tabular">
+                          {formatNim(p.amountNim, 5)} NIM
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <Button className="w-full" onClick={payWinners} disabled={paying}>
+                  <Send className="size-4" />
+                  {paying ? "Sending payments…" : `Pay ${pendingPayouts.length} winner${pendingPayouts.length === 1 ? "" : "s"}`}
+                </Button>
+              </>
+            )}
+
+            <Button size="sm" variant="ghost" className="w-full text-xs" onClick={() => wallet.signOut()}>
+              Disconnect wallet
+            </Button>
+          </div>
         )}
-        <Button
-          className="mt-4 w-full"
-          onClick={onPay}
-          disabled={paying || data.pendingCount === 0 || !data.payoutsEnabled}
-        >
-          <Send className="size-4" />
-          {paying ? "Paying winners…" : "Pay pending winners"}
-        </Button>
       </section>
     </div>
   );
@@ -500,7 +596,9 @@ function AdminRow({ row, onDone }: { row: AdminPrediction; onDone: () => void })
   const settle = useMutation({
     mutationFn: () => adminSettlePrediction({ data: { predictionId: row.id } }),
     onSuccess: (result) => {
-      toast.success(`Settled — ${result.paid} paid, ${result.pending} pending`);
+      toast.success(
+        `Settled — ${result.queued} winner${result.queued === 1 ? "" : "s"} queued for payout`,
+      );
       onDone();
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Could not settle"),

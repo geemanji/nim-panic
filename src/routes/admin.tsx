@@ -22,7 +22,7 @@ import {
   adminRecordPayouts,
 } from "@/lib/admin.functions";
 import { useWallet } from "@/hooks/useWallet";
-import { formatNim, nimToLuna } from "@/lib/nim";
+import { formatNim, nimToLuna, shortenAddress } from "@/lib/nim";
 
 const SESSION_KEY = "nim-panic-admin-token";
 
@@ -238,6 +238,8 @@ function AdminConsole({ onSignOut }: { onSignOut: () => void }) {
 
   return (
     <AppShell>
+
+    <Tabs>
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="font-display text-xl font-bold">Admin console</h1>
@@ -595,7 +597,8 @@ function AdminRow({ row, onDone }: { row: AdminPrediction; onDone: () => void })
 
   const settle = useMutation({
     mutationFn: () => adminSettlePrediction({ data: { predictionId: row.id } }),
-    onSuccess: (result) => {
+    onSuccess: (result: { queued: number }
+    ) => {
       toast.success(
         `Settled — ${result.queued} winner${result.queued === 1 ? "" : "s"} queued for payout`,
       );
